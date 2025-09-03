@@ -38,7 +38,7 @@ A production-ready web application for claiming mining and storage rewards from 
    ```
 3. **Enable GitHub Pages** in repository settings
 4. **Select source**: Deploy from main branch
-5. **Access your portal**: `https://yourusername.github.io/repository-name`
+5. **Access your portal**: `https://functionland.github.io/mainnet-claim-web`
 
 ### Local Development
 
@@ -87,7 +87,7 @@ A production-ready web application for claiming mining and storage rewards from 
 
 ### Base Mainnet  
 - **Chain ID**: 8453
-- **RPC URL**: https://base-mainnet.g.alchemy.com/v2/_LnQrpSkygkgsX96sfS_fMl78FeAHnhw
+- **RPC URL**: https://
 - **Explorer**: https://basescan.org
 
 ## PeerID Format
