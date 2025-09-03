@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Reward Engine - Claim Your Rewards</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🎁 Reward Engine</h1>
+            <p>Claim your mining and storage rewards on Base and SKALE networks</p>
+        </header>
+
+        <main>
+            <!-- Connection Status -->
+            <div class="status-card" id="connectionStatus">
+                <div class="status-indicator" id="statusIndicator">⚪</div>
+                <span id="statusText">Not Connected</span>
+            </div>
+
+            <!-- Network Selection -->
+            <div class="form-group">
+                <label for="networkSelect">Select Network:</label>
+                <select id="networkSelect" class="form-control">
+                    <option value="skale">SKALE (Recommended)</option>
+                    <option value="base">Base</option>
+                </select>
+            </div>
+
+            <!-- Peer ID Input -->
+            <div class="form-group">
+                <label for="peerIdInput">Peer ID:</label>
+                <input 
+                    type="text" 
+                    id="peerIdInput" 
+                    class="form-control" 
+                    placeholder="Enter your peer ID (e.g., 12D3KooW...)"
+                    autocomplete="off"
+                >
+                <small class="form-help">Enter your peer ID to check available rewards</small>
+            </div>
+
+            <!-- Pool ID Input -->
+            <div class="form-group">
+                <label for="poolIdInput">Pool ID:</label>
+                <input 
+                    type="number" 
+                    id="poolIdInput" 
+                    class="form-control" 
+                    placeholder="Enter pool ID (default: 1)"
+                    value="1"
+                    min="1"
+                    disabled
+                >
+                <small class="form-help">Pool ID for reward calculation (usually 1)</small>
+            </div>
+
+            <!-- Wallet Connection -->
+            <div class="form-group">
+                <button id="connectWallet" class="btn btn-primary">
+                    Connect Wallet
+                </button>
+                <div id="walletInfo" class="wallet-info" style="display: none;">
+                    <div class="wallet-address">
+                        <strong>Connected:</strong> <span id="connectedAddress"></span>
+                    </div>
+                    <div class="network-info">
+                        <strong>Network:</strong> <span id="connectedNetwork"></span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Rewards Information -->
+            <div id="rewardsSection" class="rewards-section" style="display: none;">
+                <h3>💰 Available Rewards</h3>
+                <div class="rewards-grid">
+                    <div class="reward-card">
+                        <h4>Mining Rewards</h4>
+                        <div class="reward-amount" id="miningRewards">-</div>
+                        <small>Tokens available for mining activities</small>
+                    </div>
+                    <div class="reward-card">
+                        <h4>Storage Rewards</h4>
+                        <div class="reward-amount" id="storageRewards">-</div>
+                        <small>Tokens available for storage activities</small>
+                    </div>
+                    <div class="reward-card total-rewards">
+                        <h4>Total Claimable</h4>
+                        <div class="reward-amount" id="totalRewards">-</div>
+                        <small>Combined rewards ready to claim</small>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Action Buttons -->
+            <div class="action-buttons">
+                <button id="checkRewards" class="btn btn-secondary" disabled>
+                    Check Rewards
+                </button>
+                <button id="claimRewards" class="btn btn-success" disabled>
+                    Claim Rewards
+                </button>
+            </div>
+
+            <!-- Transaction Status -->
+            <div id="transactionStatus" class="transaction-status" style="display: none;">
+                <div class="status-content">
+                    <div class="spinner" id="spinner" style="display: none;"></div>
+                    <div id="statusMessage"></div>
+                </div>
+            </div>
+
+            <!-- Error Messages -->
+            <div id="errorMessage" class="error-message" style="display: none;">
+                <span id="errorText"></span>
+                <button class="error-close" onclick="hideError()">×</button>
+            </div>
+
+            <!-- Success Messages -->
+            <div id="successMessage" class="success-message" style="display: none;">
+                <span id="successText"></span>
+                <button class="success-close" onclick="hideSuccess()">×</button>
+            </div>
+        </main>
+
+        <footer>
+            <p>Powered by Ethers.js v6 • Deployed on GitHub Pages</p>
+            <div class="contract-info">
+                <small>Contract addresses will be displayed after network selection</small>
+                <div id="contractAddress" class="contract-address"></div>
+            </div>
+        </footer>
+    </div>
+
+    <!-- Load external dependencies and main application -->
+    <script type="module" src="app.js"></script>
+</body>
+</html>
