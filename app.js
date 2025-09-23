@@ -26,32 +26,39 @@ let rewardEngineContract = null;
 let currentNetwork = 'skale';
 let connectedAddress = null;
 
-// DOM elements
-const elements = {
-    networkSelect: document.getElementById('networkSelect'),
-    peerIdInput: document.getElementById('peerIdInput'),
-    poolIdInput: document.getElementById('poolIdInput'),
-    connectWallet: document.getElementById('connectWallet'),
-    walletInfo: document.getElementById('walletInfo'),
-    connectedAddress: document.getElementById('connectedAddress'),
-    connectedNetwork: document.getElementById('connectedNetwork'),
-    checkRewards: document.getElementById('checkRewards'),
-    claimRewards: document.getElementById('claimRewards'),
-    rewardsSection: document.getElementById('rewardsSection'),
-    miningRewards: document.getElementById('miningRewards'),
-    storageRewards: document.getElementById('storageRewards'),
-    totalRewards: document.getElementById('totalRewards'),
-    statusIndicator: document.getElementById('statusIndicator'),
-    statusText: document.getElementById('statusText'),
-    contractAddress: document.getElementById('contractAddress'),
-    transactionStatus: document.getElementById('transactionStatus'),
-    statusMessage: document.getElementById('statusMessage'),
-    spinner: document.getElementById('spinner'),
-    errorMessage: document.getElementById('errorMessage'),
-    errorText: document.getElementById('errorText'),
-    successMessage: document.getElementById('successMessage'),
-    successText: document.getElementById('successText')
-};
+    // DOM elements
+    const elements = {
+        networkSelect: document.getElementById('networkSelect'),
+        peerIdInput: document.getElementById('peerIdInput'),
+        poolIdInput: document.getElementById('poolIdInput'),
+        connectWallet: document.getElementById('connectWallet'),
+        walletInfo: document.getElementById('walletInfo'),
+        connectedAddress: document.getElementById('connectedAddress'),
+        connectedNetwork: document.getElementById('connectedNetwork'),
+        checkRewards: document.getElementById('checkRewards'),
+        claimRewards: document.getElementById('claimRewards'),
+        rewardsSection: document.getElementById('rewardsSection'),
+        miningRewards: document.getElementById('miningRewards'),
+        storageRewards: document.getElementById('storageRewards'),
+        totalRewards: document.getElementById('totalRewards'),
+        statusIndicator: document.getElementById('statusIndicator'),
+        statusText: document.getElementById('statusText'),
+        contractAddress: document.getElementById('contractAddress'),
+        transactionStatus: document.getElementById('transactionStatus'),
+        statusMessage: document.getElementById('statusMessage'),
+        spinner: document.getElementById('spinner'),
+        errorMessage: document.getElementById('errorMessage'),
+        errorText: document.getElementById('errorText'),
+        successMessage: document.getElementById('successMessage'),
+        successText: document.getElementById('successText'),
+        // Monthly info elements
+        monthlyInfo: document.getElementById('monthlyInfo'),
+        infoStartOfMonth: document.getElementById('infoStartOfMonth'),
+        infoNextMonthStart: document.getElementById('infoNextMonthStart'),
+        infoClaimedThisMonth: document.getElementById('infoClaimedThisMonth'),
+        infoClaimedPrevMonth: document.getElementById('infoClaimedPrevMonth'),
+        infoTimeUntilNextMonth: document.getElementById('infoTimeUntilNextMonth')
+    };
 
 /**
  * Initialize base58 decoder for PeerID conversion
@@ -679,6 +686,61 @@ async function checkRewards() {
         // Enable claim button if there are rewards
         elements.claimRewards.disabled = totalRewards === 0n;
 
+        // Show monthly details if no rewards (e.g., due to monthly cap)
+        try {
+            if (totalRewards === 0n) {
+                // Fetch month length and latest block timestamp
+                const [secondsPerMonthBN, latestBlock] = await Promise.all([
+                    rewardEngineContract.SECONDS_PER_MONTH(),
+                    provider.getBlock('latest')
+                ]);
+
+                const now = BigInt(latestBlock.timestamp);
+                const SPM = BigInt(secondsPerMonthBN);
+                const currentMonth = now / SPM;
+                const previousMonth = currentMonth - 1n;
+                const currentMonthStart = currentMonth * SPM;
+                const nextMonthStart = (currentMonth + 1n) * SPM;
+                const timeUntilNextMonth = nextMonthStart - now;
+
+                // Query claimed amounts for peer
+                const [claimedThisMonth, claimedPrevMonth] = await Promise.all([
+                    rewardEngineContract.monthlyRewardsClaimed(peerIdBytes32, poolId, currentMonth),
+                    rewardEngineContract.monthlyRewardsClaimed(peerIdBytes32, poolId, previousMonth)
+                ]);
+
+                // Format helpers
+                const toDateTime = (ts) => {
+                    const d = new Date(Number(ts) * 1000);
+                    return d.toLocaleString();
+                };
+                const toDays = (secsBig) => {
+                    const secs = Number(secsBig);
+                    const days = secs / (60 * 60 * 24);
+                    return `${days.toFixed(1)} days`;
+                };
+
+                elements.infoStartOfMonth.textContent = toDateTime(currentMonthStart);
+                elements.infoNextMonthStart.textContent = toDateTime(nextMonthStart);
+                elements.infoClaimedThisMonth.textContent = `${formatReward(claimedThisMonth)} tokens`;
+                elements.infoClaimedPrevMonth.textContent = `${formatReward(claimedPrevMonth)} tokens`;
+                elements.infoTimeUntilNextMonth.textContent = toDays(timeUntilNextMonth);
+
+                elements.monthlyInfo.style.display = 'block';
+            } else {
+                // Hide monthly info when rewards exist
+                if (elements.monthlyInfo) {
+                    elements.monthlyInfo.style.display = 'none';
+                }
+            }
+        } catch (infoErr) {
+            console.warn('Monthly info fetch failed (non-fatal):', infoErr);
+            // Do not block main flow; hide the section on error
+            if (elements.monthlyInfo) {
+                elements.monthlyInfo.style.display = 'none';
+            }
+        }
+
         hideTransactionStatus();
         
         // Show appropriate message based on results
@@ -799,75 +861,86 @@ async function claimRewards() {
         
         showError(errorMessage);
     }
-}
 
-/**
- * Handle network selection change
- */
-function handleNetworkChange() {
-    currentNetwork = elements.networkSelect.value;
-    console.log('🌐 Network changed to:', currentNetwork);
-    
-    // Reset contract
-    rewardEngineContract = null;
-    
-    // Update contract address display
-    updateContractAddress();
-    
-    // Reinitialize contract if wallet is connected
-    if (provider && signer) {
-        initializeContract();
-    }
-    
-    // Hide rewards section
-    elements.rewardsSection.style.display = 'none';
-    elements.claimRewards.disabled = true;
-}
-
-/**
- * Handle input validation
- */
-function handleInputChange() {
-    const peerId = elements.peerIdInput.value.trim();
-    const isValidPeer = validatePeerID(peerId);
-    const isConnected = !!connectedAddress;
-    
-    // Enable check button only if peer ID is valid and wallet is connected
-    elements.checkRewards.disabled = !isValidPeer || !isConnected;
-    
-    // Hide rewards if peer ID changes
-    if (elements.rewardsSection.style.display === 'block') {
+    /**
+     * Handle network selection change
+     */
+    function handleNetworkChange() {
+        currentNetwork = elements.networkSelect.value;
+        console.log('🌐 Network changed to:', currentNetwork);
+        
+        // Reset contract
+        rewardEngineContract = null;
+        
+        // Update contract address display
+        updateContractAddress();
+        
+        // Reinitialize contract if wallet is connected
+        if (provider && signer) {
+            initializeContract();
+        }
+        
+        // Hide rewards section
         elements.rewardsSection.style.display = 'none';
+        
+        // Hide monthly info
+        if (elements.monthlyInfo) {
+            elements.monthlyInfo.style.display = 'none';
+        }
+        
+        // Disable claim button
         elements.claimRewards.disabled = true;
     }
-}
-
-/**
- * Initialize the application
- */
-function initializeApp() {
-    console.log('🚀 Initializing Reward Engine Portal...');
     
-    // Set up event listeners
-    elements.connectWallet.addEventListener('click', connectWallet);
-    elements.checkRewards.addEventListener('click', checkRewards);
-    elements.claimRewards.addEventListener('click', claimRewards);
-    elements.networkSelect.addEventListener('change', handleNetworkChange);
-    elements.peerIdInput.addEventListener('input', handleInputChange);
-    elements.poolIdInput.addEventListener('input', handleInputChange);
-    
-    // Initialize contract address display
-    updateContractAddress();
-    
-    // Check if wallet is already connected
-    if (window.ethereum && window.ethereum.selectedAddress) {
-        console.log('👛 Wallet already connected, attempting to reconnect...');
-        connectWallet();
+    /**
+     * Handle input validation
+     */
+    function handleInputChange() {
+        const peerId = elements.peerIdInput.value.trim();
+        const isValidPeer = validatePeerID(peerId);
+        const isConnected = !!connectedAddress;
+        
+        // Enable check button only if peer ID is valid and wallet is connected
+        elements.checkRewards.disabled = !isValidPeer || !isConnected;
+        
+        // Hide rewards if peer ID changes
+        if (elements.rewardsSection.style.display === 'block') {
+            elements.rewardsSection.style.display = 'none';
+            elements.claimRewards.disabled = true;
+        }
+        
+        // Hide monthly info when inputs change
+        if (elements.monthlyInfo) {
+            elements.monthlyInfo.style.display = 'none';
+        }
     }
     
-    console.log('✅ Application initialized successfully');
-}
-
+    /**
+     * Initialize the application
+     */
+    function initializeApp() {
+        console.log('🚀 Initializing Reward Engine Portal...');
+        
+        // Set up event listeners
+        elements.connectWallet.addEventListener('click', connectWallet);
+        elements.checkRewards.addEventListener('click', checkRewards);
+        elements.claimRewards.addEventListener('click', claimRewards);
+        elements.networkSelect.addEventListener('change', handleNetworkChange);
+        elements.peerIdInput.addEventListener('input', handleInputChange);
+        elements.poolIdInput.addEventListener('input', handleInputChange);
+        
+        // Initialize contract address display
+        updateContractAddress();
+        
+        // Check if wallet is already connected
+        if (window.ethereum && window.ethereum.selectedAddress) {
+            console.log('👛 Wallet already connected, attempting to reconnect...');
+            connectWallet();
+        }
+        
+        console.log('✅ Application initialized successfully');
+    }
+    
 // Global functions for HTML onclick handlers
 window.hideError = hideError;
 window.hideSuccess = hideSuccess;

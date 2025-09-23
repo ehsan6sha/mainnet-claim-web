@@ -112,6 +112,38 @@
                 </div>
             </div>
 
+            <!-- Monthly Reward Details (shown when rewards are zero) -->
+            <div id="monthlyInfo" class="monthly-info" style="display: none;">
+                <h3>📅 Monthly Reward Details</h3>
+                <div class="monthly-grid">
+                    <div class="info-card">
+                        <h4>Start of Month</h4>
+                        <div class="info-value" id="infoStartOfMonth">-</div>
+                        <small>Current monthly window start</small>
+                    </div>
+                    <div class="info-card">
+                        <h4>Next Month Start</h4>
+                        <div class="info-value" id="infoNextMonthStart">-</div>
+                        <small>When the next window begins</small>
+                    </div>
+                    <div class="info-card">
+                        <h4>Claimed This Month</h4>
+                        <div class="info-value" id="infoClaimedThisMonth">-</div>
+                        <small>Amount counted toward this month’s cap</small>
+                    </div>
+                    <div class="info-card">
+                        <h4>Claimed Previous Month</h4>
+                        <div class="info-value" id="infoClaimedPrevMonth">-</div>
+                        <small>Last month’s claimed amount</small>
+                    </div>
+                    <div class="info-card total">
+                        <h4>Time Until Next Month</h4>
+                        <div class="info-value" id="infoTimeUntilNextMonth">-</div>
+                        <small>Days remaining until reset</small>
+                    </div>
+                </div>
+            </div>
+
             <!-- Error Messages -->
             <div id="errorMessage" class="error-message" style="display: none;">
                 <span id="errorText"></span>
