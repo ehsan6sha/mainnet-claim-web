@@ -861,86 +861,87 @@ async function claimRewards() {
         
         showError(errorMessage);
     }
+}
 
-    /**
-     * Handle network selection change
-     */
-    function handleNetworkChange() {
-        currentNetwork = elements.networkSelect.value;
-        console.log('🌐 Network changed to:', currentNetwork);
-        
-        // Reset contract
-        rewardEngineContract = null;
-        
-        // Update contract address display
-        updateContractAddress();
-        
-        // Reinitialize contract if wallet is connected
-        if (provider && signer) {
-            initializeContract();
-        }
-        
-        // Hide rewards section
+/**
+ * Handle network selection change
+ */
+function handleNetworkChange() {
+    currentNetwork = elements.networkSelect.value;
+    console.log('🌐 Network changed to:', currentNetwork);
+    
+    // Reset contract
+    rewardEngineContract = null;
+    
+    // Update contract address display
+    updateContractAddress();
+    
+    // Reinitialize contract if wallet is connected
+    if (provider && signer) {
+        initializeContract();
+    }
+    
+    // Hide rewards section
+    elements.rewardsSection.style.display = 'none';
+    
+    // Hide monthly info
+    if (elements.monthlyInfo) {
+        elements.monthlyInfo.style.display = 'none';
+    }
+    
+    // Disable claim button
+    elements.claimRewards.disabled = true;
+}
+
+/**
+ * Handle input validation
+ */
+function handleInputChange() {
+    const peerId = elements.peerIdInput.value.trim();
+    const isValidPeer = validatePeerID(peerId);
+    const isConnected = !!connectedAddress;
+    
+    // Enable check button only if peer ID is valid and wallet is connected
+    elements.checkRewards.disabled = !isValidPeer || !isConnected;
+    
+    // Hide rewards if peer ID changes
+    if (elements.rewardsSection.style.display === 'block') {
         elements.rewardsSection.style.display = 'none';
-        
-        // Hide monthly info
-        if (elements.monthlyInfo) {
-            elements.monthlyInfo.style.display = 'none';
-        }
-        
-        // Disable claim button
         elements.claimRewards.disabled = true;
     }
     
-    /**
-     * Handle input validation
-     */
-    function handleInputChange() {
-        const peerId = elements.peerIdInput.value.trim();
-        const isValidPeer = validatePeerID(peerId);
-        const isConnected = !!connectedAddress;
-        
-        // Enable check button only if peer ID is valid and wallet is connected
-        elements.checkRewards.disabled = !isValidPeer || !isConnected;
-        
-        // Hide rewards if peer ID changes
-        if (elements.rewardsSection.style.display === 'block') {
-            elements.rewardsSection.style.display = 'none';
-            elements.claimRewards.disabled = true;
-        }
-        
-        // Hide monthly info when inputs change
-        if (elements.monthlyInfo) {
-            elements.monthlyInfo.style.display = 'none';
-        }
+    // Hide monthly info when inputs change
+    if (elements.monthlyInfo) {
+        elements.monthlyInfo.style.display = 'none';
+    }
+}
+
+/**
+ * Initialize the application
+ */
+function initializeApp() {
+    console.log('🚀 Initializing Reward Engine Portal...');
+    
+    // Set up event listeners
+    elements.connectWallet.addEventListener('click', connectWallet);
+    elements.checkRewards.addEventListener('click', checkRewards);
+    elements.claimRewards.addEventListener('click', claimRewards);
+    elements.networkSelect.addEventListener('change', handleNetworkChange);
+    elements.peerIdInput.addEventListener('input', handleInputChange);
+    elements.poolIdInput.addEventListener('input', handleInputChange);
+    
+    // Initialize contract address display
+    updateContractAddress();
+    
+    // Check if wallet is already connected
+    if (window.ethereum && window.ethereum.selectedAddress) {
+        console.log('👛 Wallet already connected, attempting to reconnect...');
+        connectWallet();
     }
     
-    /**
-     * Initialize the application
-     */
-    function initializeApp() {
-        console.log('🚀 Initializing Reward Engine Portal...');
-        
-        // Set up event listeners
-        elements.connectWallet.addEventListener('click', connectWallet);
-        elements.checkRewards.addEventListener('click', checkRewards);
-        elements.claimRewards.addEventListener('click', claimRewards);
-        elements.networkSelect.addEventListener('change', handleNetworkChange);
-        elements.peerIdInput.addEventListener('input', handleInputChange);
-        elements.poolIdInput.addEventListener('input', handleInputChange);
-        
-        // Initialize contract address display
-        updateContractAddress();
-        
-        // Check if wallet is already connected
-        if (window.ethereum && window.ethereum.selectedAddress) {
-            console.log('👛 Wallet already connected, attempting to reconnect...');
-            connectWallet();
-        }
-        
-        console.log('✅ Application initialized successfully');
-    }
-    
+    console.log('✅ Application initialized successfully');
+}
+
 // Global functions for HTML onclick handlers
 window.hideError = hideError;
 window.hideSuccess = hideSuccess;
