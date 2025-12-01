@@ -42,7 +42,7 @@ export const CONFIG = {
     
     // Gas configuration
     GAS_LIMITS: {
-        claimRewards: 500000000, // Increased to 500M for extra safety margin
+        claimRewards: 200000000, // Increased to 200M for extra safety margin
         checkRewards: 100000
     },
     
