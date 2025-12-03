@@ -19,6 +19,11 @@ const NETWORKS = {
 // Gas limits from config
 const GAS_LIMITS = CONFIG.GAS_LIMITS;
 
+// Claim periods configuration
+// 90 periods = ~30 days (at 8 hours per period)
+// This is fixed and cannot be changed by users
+const CLAIM_PERIODS_PER_TX = 90;
+
 // Global state
 let provider = null;
 let signer = null;
@@ -57,7 +62,13 @@ let connectedAddress = null;
         infoNextMonthStart: document.getElementById('infoNextMonthStart'),
         infoClaimedThisMonth: document.getElementById('infoClaimedThisMonth'),
         infoClaimedPrevMonth: document.getElementById('infoClaimedPrevMonth'),
-        infoTimeUntilNextMonth: document.getElementById('infoTimeUntilNextMonth')
+        infoTimeUntilNextMonth: document.getElementById('infoTimeUntilNextMonth'),
+        // Claim status elements
+        claimStatusSection: document.getElementById('claimStatusSection'),
+        totalUnclaimedPeriods: document.getElementById('totalUnclaimedPeriods'),
+        periodsPerClaim: document.getElementById('periodsPerClaim'),
+        estimatedClaimsNeeded: document.getElementById('estimatedClaimsNeeded'),
+        hasMoreToClaim: document.getElementById('hasMoreToClaim')
     };
 
 /**
@@ -686,6 +697,52 @@ async function checkRewards() {
         // Enable claim button if there are rewards
         elements.claimRewards.disabled = totalRewards === 0n;
 
+        // Fetch and display claim status (periods info)
+        try {
+            console.log('📊 Fetching claim status...');
+            const [totalUnclaimedPeriods, defaultPeriodsPerClaim, maxPeriodsPerClaim, estimatedClaimsNeeded, hasMoreToClaim] = 
+                await rewardEngineContract.getClaimStatus(connectedAddress, peerIdBytes32, poolId);
+            
+            console.log('✅ Claim status:', {
+                totalUnclaimedPeriods: totalUnclaimedPeriods.toString(),
+                defaultPeriodsPerClaim: defaultPeriodsPerClaim.toString(),
+                estimatedClaimsNeeded: estimatedClaimsNeeded.toString(),
+                hasMoreToClaim
+            });
+
+            // Update claim status UI if elements exist
+            if (elements.claimStatusSection) {
+                if (elements.totalUnclaimedPeriods) {
+                    elements.totalUnclaimedPeriods.textContent = totalUnclaimedPeriods.toString();
+                }
+                if (elements.periodsPerClaim) {
+                    elements.periodsPerClaim.textContent = `${CLAIM_PERIODS_PER_TX} (~30 days)`;
+                }
+                if (elements.estimatedClaimsNeeded) {
+                    elements.estimatedClaimsNeeded.textContent = estimatedClaimsNeeded.toString();
+                }
+                if (elements.hasMoreToClaim) {
+                    elements.hasMoreToClaim.textContent = hasMoreToClaim ? 'Yes - Multiple claims needed' : 'No - Single claim sufficient';
+                    elements.hasMoreToClaim.style.color = hasMoreToClaim ? '#f39c12' : '#27ae60';
+                }
+                elements.claimStatusSection.style.display = 'block';
+            }
+
+            // Update claim button text to indicate batched claiming
+            if (hasMoreToClaim && totalRewards > 0n) {
+                elements.claimRewards.textContent = `Claim Rewards (~30 days worth)`;
+            } else {
+                elements.claimRewards.textContent = 'Claim Rewards';
+            }
+
+        } catch (claimStatusErr) {
+            console.warn('⚠️ Could not fetch claim status (non-fatal):', claimStatusErr);
+            // Hide claim status section on error
+            if (elements.claimStatusSection) {
+                elements.claimStatusSection.style.display = 'none';
+            }
+        }
+
         // Show monthly details if no rewards (e.g., due to monthly cap)
         try {
             if (totalRewards === 0n) {
@@ -791,6 +848,8 @@ async function checkRewards() {
 
 /**
  * Claim available rewards
+ * Uses claimRewardsWithLimit with 90 periods (~30 days) per transaction
+ * This is a fixed value and cannot be changed by users to ensure gas efficiency
  */
 async function claimRewards() {
     try {
@@ -806,18 +865,25 @@ async function claimRewards() {
         }
 
         showTransactionStatus('Preparing claim transaction...', true);
-        console.log('🚀 Starting claim process:', { peerId, poolId });
+        console.log('🚀 Starting claim process:', { peerId, poolId, periodsPerClaim: CLAIM_PERIODS_PER_TX });
 
         // Convert PeerID to bytes32
         const peerIdBytes32 = await peerIdToBytes32(peerId);
         console.log('🔄 Converted PeerID for claim:', peerIdBytes32);
 
-        // Prepare transaction
+        // Prepare transaction using claimRewardsWithLimit with fixed 90 periods (~30 days)
+        // This ensures gas costs are bounded and predictable
         showTransactionStatus('Please confirm transaction in your wallet...', true);
+        console.log(`📋 Claiming with ${CLAIM_PERIODS_PER_TX} periods (~30 days worth)`);
         
-        const tx = await rewardEngineContract.claimRewards(peerIdBytes32, poolId, {
-            gasLimit: GAS_LIMITS.claimRewards
-        });
+        const tx = await rewardEngineContract.claimRewardsWithLimit(
+            peerIdBytes32, 
+            poolId, 
+            CLAIM_PERIODS_PER_TX,  // Fixed at 90 periods (~30 days)
+            {
+                gasLimit: GAS_LIMITS.claimRewards
+            }
+        );
 
         showTransactionStatus(`Transaction submitted: ${tx.hash}`, true);
         console.log('📡 Transaction submitted:', tx.hash);
@@ -833,7 +899,21 @@ async function claimRewards() {
         });
 
         hideTransactionStatus();
-        showSuccess(`Rewards claimed successfully! Transaction: ${receipt.hash}`);
+        
+        // Check if there are more periods to claim
+        try {
+            const [totalUnclaimedPeriods, , , , hasMoreToClaim] = 
+                await rewardEngineContract.getClaimStatus(connectedAddress, peerIdBytes32, poolId);
+            
+            if (hasMoreToClaim && totalUnclaimedPeriods > 0n) {
+                showSuccess(`Rewards claimed successfully! You have ${totalUnclaimedPeriods} more periods to claim. Click "Check Rewards" and claim again.`);
+            } else {
+                showSuccess(`Rewards claimed successfully! Transaction: ${receipt.hash}`);
+            }
+        } catch (statusErr) {
+            // Fallback if status check fails
+            showSuccess(`Rewards claimed successfully! Transaction: ${receipt.hash}`);
+        }
 
         // Refresh rewards display
         setTimeout(() => {
@@ -889,8 +969,14 @@ function handleNetworkChange() {
         elements.monthlyInfo.style.display = 'none';
     }
     
-    // Disable claim button
+    // Hide claim status section
+    if (elements.claimStatusSection) {
+        elements.claimStatusSection.style.display = 'none';
+    }
+    
+    // Disable claim button and reset text
     elements.claimRewards.disabled = true;
+    elements.claimRewards.textContent = 'Claim Rewards';
 }
 
 /**
@@ -914,6 +1000,14 @@ function handleInputChange() {
     if (elements.monthlyInfo) {
         elements.monthlyInfo.style.display = 'none';
     }
+    
+    // Hide claim status when inputs change
+    if (elements.claimStatusSection) {
+        elements.claimStatusSection.style.display = 'none';
+    }
+    
+    // Reset claim button text
+    elements.claimRewards.textContent = 'Claim Rewards';
 }
 
 /**

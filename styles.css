@@ -451,3 +451,162 @@ footer {
         transform: translateY(0);
     }
 }
+
+/* Claim Status Section */
+.claim-status-section {
+    margin: 1.5rem 0;
+    padding: 1.5rem;
+    background: #eff6ff;
+    border: 2px solid #93c5fd;
+    border-radius: 12px;
+    animation: slideIn 0.3s ease-out;
+}
+
+.claim-status-section h3 {
+    margin-bottom: 1rem;
+    color: #1e40af;
+}
+
+.claim-status-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 1rem;
+}
+
+.status-item {
+    background: white;
+    padding: 1.25rem;
+    border-radius: 8px;
+    text-align: center;
+    border: 1px solid #dbeafe;
+}
+
+.status-item h4 {
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: #6b7280;
+    margin-bottom: 0.5rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
+.status-value {
+    font-size: 1.4rem;
+    font-weight: 700;
+    color: #1e40af;
+    margin-bottom: 0.5rem;
+}
+
+.status-item small {
+    color: #6b7280;
+    font-size: 0.75rem;
+}
+
+.status-item.highlight {
+    border: 2px solid #3b82f6;
+    background: #dbeafe;
+}
+
+.status-item.highlight .status-value {
+    color: #1d4ed8;
+}
+
+.claim-info-note {
+    margin-top: 1rem;
+    padding: 0.75rem 1rem;
+    background: #fef3c7;
+    border: 1px solid #fcd34d;
+    border-radius: 8px;
+    font-size: 0.875rem;
+    color: #92400e;
+}
+
+.claim-info-note strong {
+    color: #78350f;
+}
+
+/* Monthly Info Section (existing styles enhanced) */
+.monthly-info {
+    margin: 1.5rem 0;
+    padding: 1.5rem;
+    background: #f0fdf4;
+    border: 2px solid #86efac;
+    border-radius: 12px;
+    animation: slideIn 0.3s ease-out;
+}
+
+.monthly-info h3 {
+    margin-bottom: 1rem;
+    color: #166534;
+}
+
+.monthly-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 1rem;
+}
+
+.info-card {
+    background: white;
+    padding: 1.25rem;
+    border-radius: 8px;
+    text-align: center;
+    border: 1px solid #bbf7d0;
+}
+
+.info-card h4 {
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: #6b7280;
+    margin-bottom: 0.5rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
+.info-value {
+    font-size: 1.2rem;
+    font-weight: 700;
+    color: #166534;
+    margin-bottom: 0.5rem;
+}
+
+.info-card small {
+    color: #6b7280;
+    font-size: 0.75rem;
+}
+
+.info-card.total {
+    border: 2px solid #22c55e;
+    background: #dcfce7;
+}
+
+.info-card.total .info-value {
+    color: #15803d;
+}
+
+/* Hover effects for status and info cards */
+.status-item:hover,
+.info-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+    transition: all 0.2s ease;
+}
+
+/* Responsive adjustments for claim status */
+@media (max-width: 768px) {
+    .claim-status-grid,
+    .monthly-grid {
+        grid-template-columns: repeat(2, 1fr);
+    }
+}
+
+@media (max-width: 480px) {
+    .claim-status-grid,
+    .monthly-grid {
+        grid-template-columns: 1fr;
+    }
+    
+    .claim-info-note {
+        font-size: 0.8rem;
+    }
+}

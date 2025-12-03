@@ -1371,6 +1371,104 @@ export const REWARD_ENGINE_ABI = [
     {
       "inputs": [
         {
+          "internalType": "bytes32",
+          "name": "peerId",
+          "type": "bytes32"
+        },
+        {
+          "internalType": "uint32",
+          "name": "poolId",
+          "type": "uint32"
+        },
+        {
+          "internalType": "uint256",
+          "name": "maxPeriods",
+          "type": "uint256"
+        }
+      ],
+      "name": "claimRewardsWithLimit",
+      "outputs": [],
+      "stateMutability": "nonpayable",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "address",
+          "name": "account",
+          "type": "address"
+        },
+        {
+          "internalType": "bytes32",
+          "name": "peerId",
+          "type": "bytes32"
+        },
+        {
+          "internalType": "uint32",
+          "name": "poolId",
+          "type": "uint32"
+        }
+      ],
+      "name": "getClaimStatus",
+      "outputs": [
+        {
+          "internalType": "uint256",
+          "name": "totalUnclaimedPeriods",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "defaultPeriodsPerClaim",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "maxPeriodsPerClaim",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "estimatedClaimsNeeded",
+          "type": "uint256"
+        },
+        {
+          "internalType": "bool",
+          "name": "hasMoreToClaim",
+          "type": "bool"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [],
+      "name": "DEFAULT_CLAIM_PERIODS_PER_TX",
+      "outputs": [
+        {
+          "internalType": "uint256",
+          "name": "",
+          "type": "uint256"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [],
+      "name": "MAX_CLAIM_PERIODS_LIMIT",
+      "outputs": [
+        {
+          "internalType": "uint256",
+          "name": "",
+          "type": "uint256"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
           "internalType": "uint256",
           "name": "maxProposalsToCheck",
           "type": "uint256"

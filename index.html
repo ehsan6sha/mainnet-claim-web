@@ -94,6 +94,36 @@
                 </div>
             </div>
 
+            <!-- Claim Status Section (shown after checking rewards) -->
+            <div id="claimStatusSection" class="claim-status-section" style="display: none;">
+                <h3>📊 Claim Status</h3>
+                <div class="claim-status-grid">
+                    <div class="status-item">
+                        <h4>Unclaimed Periods</h4>
+                        <div class="status-value" id="totalUnclaimedPeriods">-</div>
+                        <small>Total periods with rewards to claim</small>
+                    </div>
+                    <div class="status-item">
+                        <h4>Periods Per Claim</h4>
+                        <div class="status-value" id="periodsPerClaim">-</div>
+                        <small>Fixed at ~30 days per transaction</small>
+                    </div>
+                    <div class="status-item">
+                        <h4>Claims Needed</h4>
+                        <div class="status-value" id="estimatedClaimsNeeded">-</div>
+                        <small>Estimated transactions required</small>
+                    </div>
+                    <div class="status-item highlight">
+                        <h4>Multiple Claims?</h4>
+                        <div class="status-value" id="hasMoreToClaim">-</div>
+                        <small>Whether you need more than one claim</small>
+                    </div>
+                </div>
+                <div class="claim-info-note">
+                    <strong>ℹ️ Note:</strong> Each claim processes up to 90 periods (~30 days). If you have more unclaimed periods, you'll need to claim multiple times.
+                </div>
+            </div>
+
             <!-- Action Buttons -->
             <div class="action-buttons">
                 <button id="checkRewards" class="btn btn-secondary" disabled>
