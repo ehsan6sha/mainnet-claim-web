@@ -881,7 +881,7 @@ async function claimRewards() {
             poolId, 
             CLAIM_PERIODS_PER_TX,  // Fixed at 90 periods (~30 days)
             {
-                gasLimit: GAS_LIMITS.claimRewards
+                gasLimit: GAS_LIMITS[currentNetwork].claimRewards
             }
         );
 

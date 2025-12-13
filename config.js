@@ -30,7 +30,7 @@ export const CONFIG = {
         base: {
             name: "Base Mainnet",
             chainId: 8453,
-            rpcUrl: "https://mainnet.base.org",
+            rpcUrl: "https://base-rpc.publicnode.com",
             blockExplorer: "https://basescan.org",
             nativeCurrency: {
                 name: "Ethereum",
@@ -40,10 +40,16 @@ export const CONFIG = {
         }
     },
     
-    // Gas configuration
+    // Gas configuration - per network
     GAS_LIMITS: {
-        claimRewards: 100000000, // Increased to 100M for extra safety margin
-        checkRewards: 100000
+        skale: {
+            claimRewards: 100000000, // SKALE has free gas and high limits
+            checkRewards: 100000
+        },
+        base: {
+            claimRewards: 500000, // Base has ~30M block limit, use reasonable value
+            checkRewards: 100000
+        }
     },
     
     // UI configuration
