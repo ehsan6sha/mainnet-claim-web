@@ -1,7 +1,7 @@
 // Import ethers v6 from CDN
 import { ethers } from "https://cdnjs.cloudflare.com/ajax/libs/ethers/6.7.0/ethers.min.js";
 // Import configuration and ABI
-import { CONFIG } from "./config.js";
+import { CONFIG, VERSION } from "./config.js";
 import { REWARD_ENGINE_ABI } from "./abi.js";
 
 // Network configurations from config
@@ -1026,6 +1026,12 @@ function initializeApp() {
     
     // Initialize contract address display
     updateContractAddress();
+    
+    // Display version
+    const versionInfo = document.getElementById('versionInfo');
+    if (versionInfo) {
+        versionInfo.textContent = `v${VERSION}`;
+    }
     
     // Check if wallet is already connected
     if (window.ethereum && window.ethereum.selectedAddress) {
