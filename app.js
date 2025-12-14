@@ -1063,10 +1063,48 @@ function handleInputChange() {
 }
 
 /**
+ * Parse URL parameters and apply them to form fields
+ * Supports: ?network=skale|base&peerId=xxxxx
+ */
+function applyUrlParameters() {
+    const urlParams = new URLSearchParams(window.location.search);
+    
+    // Check for network parameter
+    const networkParam = urlParams.get('network');
+    if (networkParam) {
+        const normalizedNetwork = networkParam.toLowerCase();
+        if (normalizedNetwork === 'skale' || normalizedNetwork === 'base') {
+            elements.networkSelect.value = normalizedNetwork;
+            currentNetwork = normalizedNetwork;
+            console.log(`🔗 Network set from URL: ${normalizedNetwork}`);
+        } else {
+            console.warn(`⚠️ Invalid network in URL: ${networkParam}. Use 'skale' or 'base'.`);
+        }
+    }
+    
+    // Check for peerId parameter
+    const peerIdParam = urlParams.get('peerId');
+    if (peerIdParam) {
+        elements.peerIdInput.value = peerIdParam;
+        console.log(`🔗 PeerID set from URL: ${peerIdParam}`);
+    }
+    
+    // Check for poolId parameter (optional)
+    const poolIdParam = urlParams.get('poolId');
+    if (poolIdParam && !isNaN(parseInt(poolIdParam))) {
+        elements.poolIdInput.value = parseInt(poolIdParam);
+        console.log(`🔗 PoolID set from URL: ${poolIdParam}`);
+    }
+}
+
+/**
  * Initialize the application
  */
 function initializeApp() {
     console.log('🚀 Initializing Reward Engine Portal...');
+    
+    // Apply URL parameters first (before event listeners to avoid triggering changes)
+    applyUrlParameters();
     
     // Set up event listeners
     elements.connectWallet.addEventListener('click', connectWallet);
