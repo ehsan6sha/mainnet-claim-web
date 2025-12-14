@@ -290,16 +290,30 @@ function decodeContractError(error) {
         // Create interface for error decoding
         const contractInterface = new ethers.Interface(REWARD_ENGINE_ABI);
         
-        // Extract error data from the error object
+        // Extract error data from the error object - check multiple locations
         let errorData = null;
         
         if (error.data) {
             errorData = error.data;
         } else if (error.reason && error.reason.startsWith('0x')) {
             errorData = error.reason;
+        } else if (error.info?.error?.data) {
+            // ethers v6 nested error format
+            errorData = error.info.error.data;
+        } else if (error.error?.data) {
+            // Alternative nested format
+            errorData = error.error.data;
         } else if (error.transaction && error.transaction.data) {
             // For call exceptions, try to extract from transaction data
             errorData = error.data || error.reason;
+        }
+        
+        // Also check for revert reason in message
+        if (!errorData && error.message) {
+            const match = error.message.match(/data="(0x[a-fA-F0-9]+)"/);
+            if (match) {
+                errorData = match[1];
+            }
         }
         
         if (errorData && errorData.startsWith('0x')) {
@@ -871,18 +885,56 @@ async function claimRewards() {
         const peerIdBytes32 = await peerIdToBytes32(peerId);
         console.log('🔄 Converted PeerID for claim:', peerIdBytes32);
 
+        // Pre-flight check: simulate the transaction to catch errors before MetaMask
+        showTransactionStatus('Verifying claim eligibility...', true);
+        console.log(`📋 Pre-flight check for ${CLAIM_PERIODS_PER_TX} periods (~30 days worth)`);
+        
+        try {
+            await rewardEngineContract.claimRewardsWithLimit.staticCall(
+                peerIdBytes32,
+                poolId,
+                CLAIM_PERIODS_PER_TX
+            );
+            console.log('✅ Pre-flight check passed');
+        } catch (simulationError) {
+            console.error('❌ Pre-flight simulation failed:', simulationError);
+            const decodedError = decodeContractError(simulationError);
+            if (decodedError.name && decodedError.name !== 'Unknown') {
+                throw new Error(getErrorMessage(decodedError.name, decodedError.args));
+            }
+            throw new Error(`Claim would fail: ${simulationError.message}`);
+        }
+        
         // Prepare transaction using claimRewardsWithLimit with fixed 90 periods (~30 days)
         // This ensures gas costs are bounded and predictable
         showTransactionStatus('Please confirm transaction in your wallet...', true);
-        console.log(`📋 Claiming with ${CLAIM_PERIODS_PER_TX} periods (~30 days worth)`);
+        console.log(`⛽ Using gas limit: ${GAS_LIMITS[currentNetwork].claimRewards} for network: ${currentNetwork}`);
+        
+        // Build transaction options
+        const txOptions = {
+            gasLimit: GAS_LIMITS[currentNetwork].claimRewards
+        };
+        
+        // For Base network, fetch and set gas price explicitly
+        if (currentNetwork === 'base') {
+            try {
+                const feeData = await provider.getFeeData();
+                if (feeData.maxFeePerGas) {
+                    // EIP-1559 transaction (Base supports this)
+                    txOptions.maxFeePerGas = feeData.maxFeePerGas * 110n / 100n; // 10% buffer
+                    txOptions.maxPriorityFeePerGas = feeData.maxPriorityFeePerGas * 110n / 100n;
+                    console.log(`⛽ Gas prices - maxFee: ${ethers.formatUnits(txOptions.maxFeePerGas, 'gwei')} gwei`);
+                }
+            } catch (gasErr) {
+                console.warn('⚠️ Could not fetch gas prices, using defaults:', gasErr);
+            }
+        }
         
         const tx = await rewardEngineContract.claimRewardsWithLimit(
             peerIdBytes32, 
             poolId, 
             CLAIM_PERIODS_PER_TX,  // Fixed at 90 periods (~30 days)
-            {
-                gasLimit: GAS_LIMITS[currentNetwork].claimRewards
-            }
+            txOptions
         );
 
         showTransactionStatus(`Transaction submitted: ${tx.hash}`, true);

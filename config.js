@@ -3,7 +3,7 @@
  * Update the contract addresses below with your deployed contract addresses
  */
 
-export const VERSION = '1.0.1';
+export const VERSION = '1.0.2';
 
 export const CONFIG = {
     // Contract addresses - UPDATED WITH ACTUAL DEPLOYED ADDRESSES
@@ -32,7 +32,7 @@ export const CONFIG = {
         base: {
             name: "Base Mainnet",
             chainId: 8453,
-            rpcUrl: "https://mainnet.base.org",
+            rpcUrl: "https://base-rpc.publicnode.com",
             blockExplorer: "https://basescan.org",
             nativeCurrency: {
                 name: "Ethereum",
