@@ -3,7 +3,7 @@
  * Update the contract addresses below with your deployed contract addresses
  */
 
-export const VERSION = '1.0.2';
+export const VERSION = '1.0.3';
 
 export const CONFIG = {
     // Contract addresses - UPDATED WITH ACTUAL DEPLOYED ADDRESSES
@@ -49,7 +49,7 @@ export const CONFIG = {
             checkRewards: 100000
         },
         base: {
-            claimRewards: 500000, // Base has ~30M block limit, use reasonable value
+            claimRewards: 15000000, // Based on actual tx: 14,215,647 gas used
             checkRewards: 100000
         }
     },
