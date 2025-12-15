@@ -910,25 +910,11 @@ async function claimRewards() {
         showTransactionStatus('Please confirm transaction in your wallet...', true);
         console.log(`⛽ Using gas limit: ${GAS_LIMITS[currentNetwork].claimRewards} for network: ${currentNetwork}`);
         
-        // Build transaction options
+        // Build transaction options - only set gas limit, let wallet handle gas price
+        // Base L2 has very low gas prices that the wallet will determine correctly
         const txOptions = {
             gasLimit: GAS_LIMITS[currentNetwork].claimRewards
         };
-        
-        // For Base network, fetch and set gas price explicitly
-        if (currentNetwork === 'base') {
-            try {
-                const feeData = await provider.getFeeData();
-                if (feeData.maxFeePerGas) {
-                    // EIP-1559 transaction (Base supports this)
-                    txOptions.maxFeePerGas = feeData.maxFeePerGas * 110n / 100n; // 10% buffer
-                    txOptions.maxPriorityFeePerGas = feeData.maxPriorityFeePerGas * 110n / 100n;
-                    console.log(`⛽ Gas prices - maxFee: ${ethers.formatUnits(txOptions.maxFeePerGas, 'gwei')} gwei`);
-                }
-            } catch (gasErr) {
-                console.warn('⚠️ Could not fetch gas prices, using defaults:', gasErr);
-            }
-        }
         
         const tx = await rewardEngineContract.claimRewardsWithLimit(
             peerIdBytes32, 
