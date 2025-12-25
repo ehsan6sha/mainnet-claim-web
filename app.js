@@ -736,7 +736,7 @@ async function checkRewards() {
                     elements.totalUnclaimedPeriods.textContent = totalUnclaimedPeriods.toString();
                 }
                 if (elements.periodsPerClaim) {
-                    elements.periodsPerClaim.textContent = `${CLAIM_PERIODS_PER_TX} (~30 days)`;
+                    elements.periodsPerClaim.textContent = `${CLAIM_PERIODS_PER_TX} (~6 months)`;
                 }
                 if (elements.estimatedClaimsNeeded) {
                     elements.estimatedClaimsNeeded.textContent = estimatedClaimsNeeded.toString();
