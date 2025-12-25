@@ -19,10 +19,10 @@ const NETWORKS = {
 // Gas limits from config
 const GAS_LIMITS = CONFIG.GAS_LIMITS;
 
-// Claim periods configuration
-// 90 periods = ~30 days (at 8 hours per period)
+// Claim periods configuration (V2)
+// 540 periods = ~6 months (at 8 hours per period)
 // This is fixed and cannot be changed by users
-const CLAIM_PERIODS_PER_TX = 90;
+const CLAIM_PERIODS_PER_TX = 540;
 
 // Global state
 let provider = null;
@@ -370,7 +370,13 @@ function getErrorMessage(errorName, errorArgs = []) {
         'InvalidAmount': 'Invalid amount specified.',
         'LowBalance': 'Wallet balance is too low for this operation.',
         'Failed': 'Transaction failed.',
-        'FailedCall': 'Contract call failed.'
+        'FailedCall': 'Contract call failed.',
+        // V2 errors
+        'DeprecatedFunction': 'This function has been deprecated. Please update your application.',
+        'NoDataToMigrate': 'No data available to migrate.',
+        'MigrationAlreadyComplete': 'Migration has already been completed for this pool.',
+        'MigrationNotComplete': 'Migration must be completed before claiming rewards. Please contact support.',
+        'ExpectedPeriodChangeBlocked': 'Expected period cannot be changed after V2 data has been written.'
     };
     
     return errorMessages[errorName] || `Contract error: ${errorName}`;
@@ -626,9 +632,9 @@ async function checkRewards() {
         let storageError = null;
 
         try {
-            // Check mining rewards
+            // Check mining rewards (V2)
             console.log('📊 Checking mining rewards...');
-            miningRewards = await rewardEngineContract.calculateEligibleMiningRewards(
+            miningRewards = await rewardEngineContract.calculateEligibleMiningRewardsV2(
                 connectedAddress,
                 peerIdBytes32,
                 poolId
@@ -713,9 +719,9 @@ async function checkRewards() {
 
         // Fetch and display claim status (periods info)
         try {
-            console.log('📊 Fetching claim status...');
+            console.log('📊 Fetching claim status (V2)...');
             const [totalUnclaimedPeriods, defaultPeriodsPerClaim, maxPeriodsPerClaim, estimatedClaimsNeeded, hasMoreToClaim] = 
-                await rewardEngineContract.getClaimStatus(connectedAddress, peerIdBytes32, poolId);
+                await rewardEngineContract.getClaimStatusV2(connectedAddress, peerIdBytes32, poolId);
             
             console.log('✅ Claim status:', {
                 totalUnclaimedPeriods: totalUnclaimedPeriods.toString(),
@@ -744,7 +750,7 @@ async function checkRewards() {
 
             // Update claim button text to indicate batched claiming
             if (hasMoreToClaim && totalRewards > 0n) {
-                elements.claimRewards.textContent = `Claim Rewards (~30 days worth)`;
+                elements.claimRewards.textContent = `Claim Rewards (~6 months worth)`;
             } else {
                 elements.claimRewards.textContent = 'Claim Rewards';
             }
@@ -862,7 +868,7 @@ async function checkRewards() {
 
 /**
  * Claim available rewards
- * Uses claimRewardsWithLimit with 90 periods (~30 days) per transaction
+ * Uses claimRewardsWithLimitV2 with 540 periods (~6 months) per transaction
  * This is a fixed value and cannot be changed by users to ensure gas efficiency
  */
 async function claimRewards() {
@@ -887,10 +893,10 @@ async function claimRewards() {
 
         // Pre-flight check: simulate the transaction to catch errors before MetaMask
         showTransactionStatus('Verifying claim eligibility...', true);
-        console.log(`📋 Pre-flight check for ${CLAIM_PERIODS_PER_TX} periods (~30 days worth)`);
+        console.log(`📋 Pre-flight check for ${CLAIM_PERIODS_PER_TX} periods (~6 months worth)`);
         
         try {
-            await rewardEngineContract.claimRewardsWithLimit.staticCall(
+            await rewardEngineContract.claimRewardsWithLimitV2.staticCall(
                 peerIdBytes32,
                 poolId,
                 CLAIM_PERIODS_PER_TX
@@ -905,7 +911,7 @@ async function claimRewards() {
             throw new Error(`Claim would fail: ${simulationError.message}`);
         }
         
-        // Prepare transaction using claimRewardsWithLimit with fixed 90 periods (~30 days)
+        // Prepare transaction using claimRewardsWithLimitV2 with fixed 540 periods (~6 months)
         // This ensures gas costs are bounded and predictable
         showTransactionStatus('Please confirm transaction in your wallet...', true);
         console.log(`⛽ Using gas limit: ${GAS_LIMITS[currentNetwork].claimRewards} for network: ${currentNetwork}`);
@@ -916,10 +922,10 @@ async function claimRewards() {
             gasLimit: GAS_LIMITS[currentNetwork].claimRewards
         };
         
-        const tx = await rewardEngineContract.claimRewardsWithLimit(
+        const tx = await rewardEngineContract.claimRewardsWithLimitV2(
             peerIdBytes32, 
             poolId, 
-            CLAIM_PERIODS_PER_TX,  // Fixed at 90 periods (~30 days)
+            CLAIM_PERIODS_PER_TX,  // Fixed at 540 periods (~6 months)
             txOptions
         );
 
@@ -941,7 +947,7 @@ async function claimRewards() {
         // Check if there are more periods to claim
         try {
             const [totalUnclaimedPeriods, , , , hasMoreToClaim] = 
-                await rewardEngineContract.getClaimStatus(connectedAddress, peerIdBytes32, poolId);
+                await rewardEngineContract.getClaimStatusV2(connectedAddress, peerIdBytes32, poolId);
             
             if (hasMoreToClaim && totalUnclaimedPeriods > 0n) {
                 showSuccess(`Rewards claimed successfully! You have ${totalUnclaimedPeriods} more periods to claim. Click "Check Rewards" and claim again.`);

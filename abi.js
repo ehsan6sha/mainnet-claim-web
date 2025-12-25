@@ -77,6 +77,31 @@ export const REWARD_ENGINE_ABI = [
       "type": "error"
     },
     {
+      "inputs": [],
+      "name": "DeprecatedFunction",
+      "type": "error"
+    },
+    {
+      "inputs": [],
+      "name": "NoDataToMigrate",
+      "type": "error"
+    },
+    {
+      "inputs": [],
+      "name": "MigrationAlreadyComplete",
+      "type": "error"
+    },
+    {
+      "inputs": [],
+      "name": "MigrationNotComplete",
+      "type": "error"
+    },
+    {
+      "inputs": [],
+      "name": "ExpectedPeriodChangeBlocked",
+      "type": "error"
+    },
+    {
       "inputs": [
         {
           "internalType": "uint256",
@@ -638,6 +663,37 @@ export const REWARD_ENGINE_ABI = [
         }
       ],
       "name": "OnlineStatusSubmitted",
+      "type": "event"
+    },
+    {
+      "anonymous": false,
+      "inputs": [
+        {
+          "indexed": true,
+          "internalType": "uint32",
+          "name": "poolId",
+          "type": "uint32"
+        },
+        {
+          "indexed": false,
+          "internalType": "uint256",
+          "name": "timestampsProcessed",
+          "type": "uint256"
+        },
+        {
+          "indexed": false,
+          "internalType": "uint256",
+          "name": "lastTimestamp",
+          "type": "uint256"
+        },
+        {
+          "indexed": false,
+          "internalType": "bool",
+          "name": "complete",
+          "type": "bool"
+        }
+      ],
+      "name": "OnlineStatusesMigrated",
       "type": "event"
     },
     {
@@ -1305,6 +1361,35 @@ export const REWARD_ENGINE_ABI = [
           "type": "uint256"
         }
       ],
+      "stateMutability": "pure",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "address",
+          "name": "account",
+          "type": "address"
+        },
+        {
+          "internalType": "bytes32",
+          "name": "peerId",
+          "type": "bytes32"
+        },
+        {
+          "internalType": "uint32",
+          "name": "poolId",
+          "type": "uint32"
+        }
+      ],
+      "name": "calculateEligibleMiningRewardsV2",
+      "outputs": [
+        {
+          "internalType": "uint256",
+          "name": "eligibleRewards",
+          "type": "uint256"
+        }
+      ],
       "stateMutability": "view",
       "type": "function"
     },
@@ -1339,6 +1424,19 @@ export const REWARD_ENGINE_ABI = [
     },
     {
       "inputs": [],
+      "name": "canResetCircuitBreaker",
+      "outputs": [
+        {
+          "internalType": "bool",
+          "name": "canReset",
+          "type": "bool"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [],
       "name": "circuitBreakerTripped",
       "outputs": [
         {
@@ -1348,6 +1446,142 @@ export const REWARD_ENGINE_ABI = [
         }
       ],
       "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [],
+      "name": "hasV2Data",
+      "outputs": [
+        {
+          "internalType": "bool",
+          "name": "",
+          "type": "bool"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "uint32",
+          "name": "",
+          "type": "uint32"
+        }
+      ],
+      "name": "migrationComplete",
+      "outputs": [
+        {
+          "internalType": "bool",
+          "name": "",
+          "type": "bool"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "uint32",
+          "name": "",
+          "type": "uint32"
+        }
+      ],
+      "name": "migrationCursor",
+      "outputs": [
+        {
+          "internalType": "uint256",
+          "name": "",
+          "type": "uint256"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "uint32",
+          "name": "",
+          "type": "uint32"
+        }
+      ],
+      "name": "migrationPeerCursor",
+      "outputs": [
+        {
+          "internalType": "uint256",
+          "name": "",
+          "type": "uint256"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "uint32",
+          "name": "",
+          "type": "uint32"
+        }
+      ],
+      "name": "poolHasV2Submissions",
+      "outputs": [
+        {
+          "internalType": "bool",
+          "name": "",
+          "type": "bool"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "uint32",
+          "name": "",
+          "type": "uint32"
+        },
+        {
+          "internalType": "uint256",
+          "name": "",
+          "type": "uint256"
+        },
+        {
+          "internalType": "bytes32",
+          "name": "",
+          "type": "bytes32"
+        }
+      ],
+      "name": "periodOnlineStatus",
+      "outputs": [
+        {
+          "internalType": "bool",
+          "name": "",
+          "type": "bool"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "uint32",
+          "name": "poolId",
+          "type": "uint32"
+        },
+        {
+          "internalType": "uint256",
+          "name": "maxOperations",
+          "type": "uint256"
+        }
+      ],
+      "name": "adminMigrateOnlineStatuses",
+      "outputs": [],
+      "stateMutability": "nonpayable",
       "type": "function"
     },
     {
@@ -1364,6 +1598,24 @@ export const REWARD_ENGINE_ABI = [
         }
       ],
       "name": "claimRewards",
+      "outputs": [],
+      "stateMutability": "pure",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "bytes32",
+          "name": "peerId",
+          "type": "bytes32"
+        },
+        {
+          "internalType": "uint32",
+          "name": "poolId",
+          "type": "uint32"
+        }
+      ],
+      "name": "claimRewardsV2",
       "outputs": [],
       "stateMutability": "nonpayable",
       "type": "function"
@@ -1387,6 +1639,29 @@ export const REWARD_ENGINE_ABI = [
         }
       ],
       "name": "claimRewardsWithLimit",
+      "outputs": [],
+      "stateMutability": "pure",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "bytes32",
+          "name": "peerId",
+          "type": "bytes32"
+        },
+        {
+          "internalType": "uint32",
+          "name": "poolId",
+          "type": "uint32"
+        },
+        {
+          "internalType": "uint256",
+          "name": "maxPeriods",
+          "type": "uint256"
+        }
+      ],
+      "name": "claimRewardsWithLimitV2",
       "outputs": [],
       "stateMutability": "nonpayable",
       "type": "function"
@@ -1437,6 +1712,55 @@ export const REWARD_ENGINE_ABI = [
           "type": "bool"
         }
       ],
+      "stateMutability": "pure",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "address",
+          "name": "account",
+          "type": "address"
+        },
+        {
+          "internalType": "bytes32",
+          "name": "peerId",
+          "type": "bytes32"
+        },
+        {
+          "internalType": "uint32",
+          "name": "poolId",
+          "type": "uint32"
+        }
+      ],
+      "name": "getClaimStatusV2",
+      "outputs": [
+        {
+          "internalType": "uint256",
+          "name": "totalUnclaimedPeriods",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "defaultPeriodsPerClaim",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "maxPeriodsPerClaim",
+          "type": "uint256"
+        },
+        {
+          "internalType": "uint256",
+          "name": "estimatedClaimsNeeded",
+          "type": "uint256"
+        },
+        {
+          "internalType": "bool",
+          "name": "hasMoreToClaim",
+          "type": "bool"
+        }
+      ],
       "stateMutability": "view",
       "type": "function"
     },
@@ -1456,6 +1780,58 @@ export const REWARD_ENGINE_ABI = [
     {
       "inputs": [],
       "name": "MAX_CLAIM_PERIODS_LIMIT",
+      "outputs": [
+        {
+          "internalType": "uint256",
+          "name": "",
+          "type": "uint256"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [],
+      "name": "DEFAULT_CLAIM_PERIODS_PER_TX_V2",
+      "outputs": [
+        {
+          "internalType": "uint256",
+          "name": "",
+          "type": "uint256"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [],
+      "name": "MAX_CLAIM_PERIODS_LIMIT_V2",
+      "outputs": [
+        {
+          "internalType": "uint256",
+          "name": "",
+          "type": "uint256"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [],
+      "name": "MAX_VIEW_PERIODS_V2",
+      "outputs": [
+        {
+          "internalType": "uint256",
+          "name": "",
+          "type": "uint256"
+        }
+      ],
+      "stateMutability": "view",
+      "type": "function"
+    },
+    {
+      "inputs": [],
+      "name": "SIX_MONTHS_IN_PERIODS",
       "outputs": [
         {
           "internalType": "uint256",
@@ -1698,7 +2074,7 @@ export const REWARD_ENGINE_ABI = [
           "type": "bytes32[]"
         }
       ],
-      "stateMutability": "view",
+      "stateMutability": "pure",
       "type": "function"
     },
     {
@@ -2631,6 +3007,29 @@ export const REWARD_ENGINE_ABI = [
         }
       ],
       "name": "submitOnlineStatusBatch",
+      "outputs": [],
+      "stateMutability": "pure",
+      "type": "function"
+    },
+    {
+      "inputs": [
+        {
+          "internalType": "uint32",
+          "name": "poolId",
+          "type": "uint32"
+        },
+        {
+          "internalType": "bytes32[]",
+          "name": "peerIds",
+          "type": "bytes32[]"
+        },
+        {
+          "internalType": "uint256",
+          "name": "timestamp",
+          "type": "uint256"
+        }
+      ],
+      "name": "submitOnlineStatusBatchV2",
       "outputs": [],
       "stateMutability": "nonpayable",
       "type": "function"
