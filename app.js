@@ -40,6 +40,7 @@ let connectedAddress = null;
         walletInfo: document.getElementById('walletInfo'),
         connectedAddress: document.getElementById('connectedAddress'),
         connectedNetwork: document.getElementById('connectedNetwork'),
+        addFulaToken: document.getElementById('addFulaToken'),
         checkRewards: document.getElementById('checkRewards'),
         claimRewards: document.getElementById('claimRewards'),
         rewardsSection: document.getElementById('rewardsSection'),
@@ -485,6 +486,7 @@ async function connectWallet() {
         elements.connectWallet.disabled = true;
 
         // Enable buttons
+        elements.addFulaToken.disabled = false;
         elements.checkRewards.disabled = false;
         
         updateConnectionStatus('Wallet Connected', '🟢');
@@ -585,6 +587,58 @@ async function initializeContract() {
     } catch (error) {
         console.error('❌ Contract initialization failed:', error);
         showError(`Contract initialization failed: ${error.message}`);
+    }
+}
+
+/**
+ * Add FULA token to the user's wallet using wallet_watchAsset
+ */
+async function addFulaToken() {
+    try {
+        if (!window.ethereum) {
+            throw new Error('No wallet detected. Please install MetaMask or another Web3 wallet.');
+        }
+
+        if (!connectedAddress) {
+            throw new Error('Please connect your wallet first');
+        }
+
+        const tokenConfig = CONFIG.FULA_TOKEN;
+        
+        console.log('🪙 Adding FULA token to wallet:', tokenConfig);
+        showTransactionStatus('Adding FULA token to wallet...', false);
+
+        const wasAdded = await window.ethereum.request({
+            method: 'wallet_watchAsset',
+            params: {
+                type: 'ERC20',
+                options: {
+                    address: tokenConfig.address,
+                    symbol: tokenConfig.symbol,
+                    decimals: tokenConfig.decimals,
+                    // image: '' // Optional: token logo URL
+                },
+            },
+        });
+
+        hideTransactionStatus();
+
+        if (wasAdded) {
+            showSuccess('FULA token added to your wallet successfully!');
+            console.log('✅ FULA token added to wallet');
+        } else {
+            showError('Token was not added. You may have cancelled the request.');
+            console.log('⚠️ User declined to add token');
+        }
+    } catch (error) {
+        console.error('❌ Failed to add token:', error);
+        hideTransactionStatus();
+        
+        if (error.code === 4001) {
+            showError('Request was rejected by user');
+        } else {
+            showError(`Failed to add token: ${error.message}`);
+        }
     }
 }
 
@@ -1100,6 +1154,7 @@ function initializeApp() {
     
     // Set up event listeners
     elements.connectWallet.addEventListener('click', connectWallet);
+    elements.addFulaToken.addEventListener('click', addFulaToken);
     elements.checkRewards.addEventListener('click', checkRewards);
     elements.claimRewards.addEventListener('click', claimRewards);
     elements.networkSelect.addEventListener('change', handleNetworkChange);

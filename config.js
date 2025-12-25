@@ -3,7 +3,7 @@
  * Update the contract addresses below with your deployed contract addresses
  */
 
-export const VERSION = '2.0.0';
+export const VERSION = '2.0.1';
 
 export const CONFIG = {
     // Contract addresses - UPDATED WITH ACTUAL DEPLOYED ADDRESSES
@@ -14,6 +14,14 @@ export const CONFIG = {
         base: {
             rewardEngine: "0x31029f90405fd3D9cB0835c6d21b9DFF058Df45A"
         }
+    },
+    
+    // FULA Token address (same on both networks)
+    FULA_TOKEN: {
+        address: "0x9e12735d77c72c5C3670636D428f2F3815d8A4cB",
+        symbol: "FULA",
+        decimals: 18,
+        name: "Functionland FULA"
     },
     
     // Network configurations
