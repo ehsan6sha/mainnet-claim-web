@@ -30,6 +30,7 @@ let signer = null;
 let rewardEngineContract = null;
 let currentNetwork = 'skale';
 let connectedAddress = null;
+let expectedWallet = null;
 
     // DOM elements
     const elements = {
@@ -57,6 +58,9 @@ let connectedAddress = null;
         errorText: document.getElementById('errorText'),
         successMessage: document.getElementById('successMessage'),
         successText: document.getElementById('successText'),
+        // Wallet warning elements
+        walletWarning: document.getElementById('walletWarning'),
+        walletWarningText: document.getElementById('walletWarningText'),
         // Monthly info elements
         monthlyInfo: document.getElementById('monthlyInfo'),
         infoStartOfMonth: document.getElementById('infoStartOfMonth'),
@@ -282,6 +286,24 @@ function hideSuccess() {
 }
 
 /**
+ * Show wallet mismatch warning (non-blocking)
+ * @param {string} expected - Expected wallet address from URL
+ * @param {string} connected - Actually connected wallet address
+ */
+function showWalletWarning(expected, connected) {
+    elements.walletWarningText.textContent =
+        `Warning: Expected wallet ${expected.slice(0, 6)}...${expected.slice(-4)} but you connected with ${connected.slice(0, 6)}...${connected.slice(-4)}. The rewards shown may not be accurate for this wallet.`;
+    elements.walletWarning.style.display = 'flex';
+}
+
+/**
+ * Hide wallet mismatch warning
+ */
+function hideWalletWarning() {
+    elements.walletWarning.style.display = 'none';
+}
+
+/**
  * Decode contract error using the complete ABI
  * @param {Error} error - The contract error to decode
  * @returns {Object} - Decoded error information
@@ -492,6 +514,13 @@ async function connectWallet() {
         updateConnectionStatus('Wallet Connected', '🟢');
         hideTransactionStatus();
         showSuccess('Wallet connected successfully!');
+
+        // Check if connected wallet matches the expected wallet from URL
+        if (expectedWallet && connectedAddress.toLowerCase() !== expectedWallet.toLowerCase()) {
+            showWalletWarning(expectedWallet, connectedAddress);
+        } else {
+            hideWalletWarning();
+        }
 
         // Initialize contract
         await initializeContract();
@@ -1135,6 +1164,13 @@ function applyUrlParameters() {
         console.log(`🔗 PeerID set from URL: ${peerIdParam}`);
     }
     
+    // Check for wallet parameter (expected wallet address)
+    const walletParam = urlParams.get('wallet');
+    if (walletParam) {
+        expectedWallet = walletParam;
+        console.log(`🔗 Expected wallet set from URL: ${walletParam}`);
+    }
+
     // Check for poolId parameter (optional)
     const poolIdParam = urlParams.get('poolId');
     if (poolIdParam && !isNaN(parseInt(poolIdParam))) {
@@ -1182,6 +1218,7 @@ function initializeApp() {
 // Global functions for HTML onclick handlers
 window.hideError = hideError;
 window.hideSuccess = hideSuccess;
+window.hideWalletWarning = hideWalletWarning;
 
 // Initialize when DOM is loaded
 if (document.readyState === 'loading') {
