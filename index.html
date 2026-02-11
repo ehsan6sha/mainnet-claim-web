@@ -179,7 +179,10 @@
 
             <!-- Wallet Mismatch Warning -->
             <div id="walletWarning" class="warning-message" style="display: none;">
-                <span id="walletWarningText"></span>
+                <div class="warning-content">
+                    <span id="walletWarningText"></span>
+                    <button class="btn btn-warning" onclick="switchWallet()">Switch Wallet</button>
+                </div>
                 <button class="warning-close" onclick="hideWalletWarning()">×</button>
             </div>
 

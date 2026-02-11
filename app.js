@@ -466,22 +466,45 @@ function validatePeerID(peerId) {
 }
 
 /**
+ * Request MetaMask to show the account picker using wallet_requestPermissions.
+ * Returns the selected accounts array.
+ */
+async function requestAccountPicker() {
+    await window.ethereum.request({
+        method: 'wallet_requestPermissions',
+        params: [{ eth_accounts: {} }]
+    });
+    // After permissions are granted, fetch the now-selected accounts
+    return await window.ethereum.request({ method: 'eth_accounts' });
+}
+
+/**
  * Connect to MetaMask wallet
+ * If an expectedWallet is set from URL params, it will automatically
+ * prompt the account picker if the wrong account is initially connected.
  */
 async function connectWallet() {
     try {
         console.log('🔗 Attempting to connect wallet...');
-        
+
         if (!window.ethereum) {
             throw new Error('MetaMask not detected. Please install MetaMask browser extension.');
         }
 
         showTransactionStatus('Connecting to wallet...', true);
 
-        // Request account access
-        const accounts = await window.ethereum.request({
-            method: 'eth_requestAccounts'
-        });
+        // If an expected wallet is specified, use wallet_requestPermissions
+        // to force the account picker so the user can choose the right one
+        let accounts;
+        if (expectedWallet) {
+            console.log(`🎯 Expected wallet: ${expectedWallet}, opening account picker...`);
+            showTransactionStatus('Please select the correct wallet in MetaMask...', true);
+            accounts = await requestAccountPicker();
+        } else {
+            accounts = await window.ethereum.request({
+                method: 'eth_requestAccounts'
+            });
+        }
 
         if (accounts.length === 0) {
             throw new Error('No accounts found. Please unlock your MetaMask wallet.');
@@ -510,7 +533,7 @@ async function connectWallet() {
         // Enable buttons
         elements.addFulaToken.disabled = false;
         elements.checkRewards.disabled = false;
-        
+
         updateConnectionStatus('Wallet Connected', '🟢');
         hideTransactionStatus();
         showSuccess('Wallet connected successfully!');
@@ -531,6 +554,62 @@ async function connectWallet() {
         hideTransactionStatus();
         showError(`Wallet connection failed: ${error.message}`);
         updateConnectionStatus('Connection Failed', '🔴');
+    }
+}
+
+/**
+ * Switch wallet by re-prompting the MetaMask account picker.
+ * Called from the wallet mismatch warning banner.
+ */
+async function switchWallet() {
+    try {
+        if (!window.ethereum) {
+            throw new Error('MetaMask not detected.');
+        }
+
+        showTransactionStatus('Please select the correct wallet in MetaMask...', true);
+
+        const accounts = await requestAccountPicker();
+
+        if (accounts.length === 0) {
+            throw new Error('No accounts found.');
+        }
+
+        // Update provider, signer, and address
+        provider = new ethers.BrowserProvider(window.ethereum);
+        signer = await provider.getSigner();
+        connectedAddress = accounts[0];
+
+        // Update UI
+        const network = await provider.getNetwork();
+        const networkConfig = Object.values(NETWORKS).find(n => Number(n.chainId) === Number(network.chainId));
+        const networkName = networkConfig ? networkConfig.name : `Chain ID: ${network.chainId}`;
+
+        elements.connectedAddress.textContent = `${connectedAddress.slice(0, 6)}...${connectedAddress.slice(-4)}`;
+        elements.connectedNetwork.textContent = networkName;
+
+        hideTransactionStatus();
+
+        // Re-check wallet match
+        if (expectedWallet && connectedAddress.toLowerCase() !== expectedWallet.toLowerCase()) {
+            showWalletWarning(expectedWallet, connectedAddress);
+            showError('Still connected to the wrong wallet. Please try again.');
+        } else {
+            hideWalletWarning();
+            showSuccess('Switched to the correct wallet!');
+        }
+
+        // Re-initialize contract with new signer
+        await initializeContract();
+
+    } catch (error) {
+        console.error('❌ Wallet switch failed:', error);
+        hideTransactionStatus();
+        if (error.code === 4001) {
+            showError('Wallet switch was cancelled.');
+        } else {
+            showError(`Failed to switch wallet: ${error.message}`);
+        }
     }
 }
 
@@ -1219,6 +1298,7 @@ function initializeApp() {
 window.hideError = hideError;
 window.hideSuccess = hideSuccess;
 window.hideWalletWarning = hideWalletWarning;
+window.switchWallet = switchWallet;
 
 // Initialize when DOM is loaded
 if (document.readyState === 'loading') {
