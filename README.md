@@ -1,13 +1,13 @@
 # Reward Engine Portal
 
-A production-ready web application for claiming mining and storage rewards from the RewardEngine smart contract deployed on Base and SKALE networks.
+A production-ready web application for claiming mining and network rewards from the RewardEngine smart contract deployed on Base and SKALE networks.
 
 ## Features
 
 - 🌐 **Multi-Network Support**: Works with both Base and SKALE mainnet
 - 👛 **Wallet Integration**: Seamless MetaMask connection with automatic network switching
 - 🔄 **PeerID Conversion**: Automatic conversion from PeerID to bytes32 format for contract calls
-- 💰 **Reward Checking**: View available mining and storage rewards before claiming
+- 💰 **Reward Checking**: View available mining and network rewards before claiming
 - 🛡️ **Production Security**: Comprehensive error handling and input validation
 - 📱 **Mobile Responsive**: Works on both desktop and mobile devices
 - ⚡ **Real-time Updates**: Live transaction status and confirmation tracking
@@ -102,9 +102,9 @@ PeerIDs are automatically converted to bytes32 format for smart contract interac
 
 The portal interacts with the RewardEngine contract using these functions:
 
-- `calculateEligibleMiningRewards(address, bytes32, uint32)`: Check mining rewards
-- `calculateEligibleStorageRewards(address, bytes32, uint32)`: Check storage rewards  
-- `claimRewards(bytes32, uint32)`: Claim available rewards
+- `getUnclaimedRewards(address, bytes32, uint32)`: Returns `(unclaimedMining, unclaimedStorage, totalUnclaimed)` in a single call. Storage (a.k.a. Network) rewards are an accumulated balance credited by the pool operator via `submitStorageRewardsBatch` on the upgraded RewardEngine.
+- `getClaimStatusV2(address, bytes32, uint32)`: Period status for mining (total unclaimed periods, per-claim cap, estimated claims needed).
+- `claimRewardsWithLimitV2(bytes32, uint32, uint256)`: Claims up to N mining periods plus the full accumulated storage balance in one transaction.
 
 ## Error Handling
 

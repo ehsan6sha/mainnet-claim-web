@@ -790,25 +790,31 @@ async function checkRewards() {
 
         let miningRewards = 0n;
         let storageRewards = 0n;
-        let miningError = null;
-        let storageError = null;
+        let rewardsError = null;
 
         try {
-            // Check mining rewards (V2)
-            console.log('📊 Checking mining rewards...');
-            miningRewards = await rewardEngineContract.calculateEligibleMiningRewardsV2(
+            // V2: getUnclaimedRewards returns mining + storage in one call.
+            // Mining is computed from period-based accumulation; storage is the
+            // accumulated balance credited by the pool operator via
+            // submitStorageRewardsBatch on the upgraded RewardEngine.
+            console.log('📊 Fetching unclaimed rewards (mining + storage)...');
+            const result = await rewardEngineContract.getUnclaimedRewards(
                 connectedAddress,
                 peerIdBytes32,
                 poolId
             );
-            console.log('✅ Mining rewards:', miningRewards.toString());
-        } catch (miningErr) {
-            console.warn('⚠️ Mining rewards check failed:', miningErr);
-            
-            // Try to decode the custom error
-            const decodedError = decodeContractError(miningErr);
-            console.log('🔍 Decoded mining error:', decodedError);
-            
+            miningRewards = result.unclaimedMining ?? result[0];
+            storageRewards = result.unclaimedStorage ?? result[1];
+            console.log('✅ Unclaimed rewards:', {
+                mining: miningRewards.toString(),
+                storage: storageRewards.toString()
+            });
+        } catch (err) {
+            console.warn('⚠️ getUnclaimedRewards check failed:', err);
+
+            const decodedError = decodeContractError(err);
+            console.log('🔍 Decoded error:', decodedError);
+
             // Handle critical errors that should stop execution
             if (decodedError.name === 'InvalidPeerId') {
                 throw new Error('Invalid Peer ID format');
@@ -819,40 +825,9 @@ async function checkRewards() {
             } else if (decodedError.name === 'EnforcedPause') {
                 throw new Error('Contract is currently paused');
             }
-            
-            // Store error for UI display
-            miningError = decodedError;
-        }
 
-        try {
-            // Check storage rewards
-            console.log('📊 Checking storage rewards...');
-            storageRewards = await rewardEngineContract.calculateEligibleStorageRewards(
-                connectedAddress,
-                peerIdBytes32,
-                poolId
-            );
-            console.log('✅ Storage rewards:', storageRewards.toString());
-        } catch (storageErr) {
-            console.warn('⚠️ Storage rewards check failed:', storageErr);
-            
-            // Try to decode the custom error
-            const decodedError = decodeContractError(storageErr);
-            console.log('🔍 Decoded storage error:', decodedError);
-            
-            // Handle critical errors that should stop execution
-            if (decodedError.name === 'InvalidPeerId') {
-                throw new Error('Invalid Peer ID format');
-            } else if (decodedError.name === 'InvalidPoolId') {
-                throw new Error('Invalid Pool ID');
-            } else if (decodedError.name === 'CircuitBreakerTripped') {
-                throw new Error('Contract is temporarily paused for security reasons');
-            } else if (decodedError.name === 'EnforcedPause') {
-                throw new Error('Contract is currently paused');
-            }
-            
             // Store error for UI display
-            storageError = decodedError;
+            rewardsError = decodedError;
         }
 
         // Calculate total
@@ -865,14 +840,11 @@ async function checkRewards() {
         };
 
         // Update UI with rewards and error information
-        elements.miningRewards.textContent = miningError 
-            ? `Error: ${getErrorMessage(miningError.name)}` 
-            : `${formatReward(miningRewards)} tokens`;
-            
-        elements.storageRewards.textContent = storageError 
-            ? `Error: ${getErrorMessage(storageError.name)}` 
-            : `${formatReward(storageRewards)} tokens`;
-            
+        const rewardsErrorText = rewardsError
+            ? `Error: ${getErrorMessage(rewardsError.name)}`
+            : null;
+        elements.miningRewards.textContent = rewardsErrorText ?? `${formatReward(miningRewards)} tokens`;
+        elements.storageRewards.textContent = rewardsErrorText ?? `${formatReward(storageRewards)} tokens`;
         elements.totalRewards.textContent = `${formatReward(totalRewards)} tokens`;
         elements.rewardsSection.style.display = 'block';
 
@@ -985,17 +957,8 @@ async function checkRewards() {
         // Show appropriate message based on results
         if (totalRewards > 0n) {
             showSuccess(`Found ${formatReward(totalRewards)} tokens available for claiming!`);
-        } else if (miningError || storageError) {
-            // Show warning about specific errors
-            let warningMessage = 'Rewards checked successfully. ';
-            if (miningError && storageError) {
-                warningMessage += `Mining: ${getErrorMessage(miningError.name)}. Storage: ${getErrorMessage(storageError.name)}.`;
-            } else if (miningError) {
-                warningMessage += `Mining rewards error: ${getErrorMessage(miningError.name)}.`;
-            } else if (storageError) {
-                warningMessage += `Storage rewards error: ${getErrorMessage(storageError.name)}.`;
-            }
-            showError(warningMessage);
+        } else if (rewardsError) {
+            showError(`Could not load rewards: ${getErrorMessage(rewardsError.name)}.`);
         } else {
             showSuccess('Rewards checked successfully. No rewards available for claiming at this time.');
         }
