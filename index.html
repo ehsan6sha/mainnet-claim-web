@@ -72,6 +72,19 @@
                 </div>
             </div>
 
+            <!-- Catch-up Notice (shown when lastClaimed is older than the
+                 contract's MAX_VIEW_PERIODS_V2 window and rewards == 0). The
+                 contract's claim path advances `lastClaimed` even when zero
+                 rewards are paid, so a short series of "advance" transactions
+                 is required to unstick users whose peer was offline for >6
+                 months. See app.js #catchUp. -->
+            <div id="catchUpBanner" class="catchup-banner" style="display: none;">
+                <div class="catchup-content">
+                    <div class="catchup-title">⏳ Catch-up required</div>
+                    <div class="catchup-body" id="catchUpBody"></div>
+                </div>
+            </div>
+
             <!-- Rewards Information -->
             <div id="rewardsSection" class="rewards-section" style="display: none;">
                 <h3>💰 Available Rewards</h3>

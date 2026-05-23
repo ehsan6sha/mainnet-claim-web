@@ -32,6 +32,19 @@ let currentNetwork = 'skale';
 let connectedAddress = null;
 let expectedWallet = null;
 
+// Catch-up state: populated by checkRewards() when getUnclaimedRewards
+// returns 0 BUT the user's effective claim start is older than the contract's
+// view window (MAX_VIEW_PERIODS_V2 * expectedPeriod). In that case, the
+// contract's claim path advances `lastClaimedRewards` even when no rewards
+// are paid (see RewardEngine._claimRewardsInternalV2 "Nothing to actually pay
+// this call: advance mining timestamp through empty periods"), so a series of
+// 0-reward "advance" claims is needed before real rewards become visible.
+//
+// Shape when active:
+//   { daysBehind, estimatedCatchUpClaims, hasRecentActivity }
+// null when not in catch-up mode.
+let catchUpState = null;
+
     // DOM elements
     const elements = {
         networkSelect: document.getElementById('networkSelect'),
@@ -73,7 +86,10 @@ let expectedWallet = null;
         totalUnclaimedPeriods: document.getElementById('totalUnclaimedPeriods'),
         periodsPerClaim: document.getElementById('periodsPerClaim'),
         estimatedClaimsNeeded: document.getElementById('estimatedClaimsNeeded'),
-        hasMoreToClaim: document.getElementById('hasMoreToClaim')
+        hasMoreToClaim: document.getElementById('hasMoreToClaim'),
+        // Catch-up banner elements
+        catchUpBanner: document.getElementById('catchUpBanner'),
+        catchUpBody: document.getElementById('catchUpBody')
     };
 
 /**
@@ -283,6 +299,39 @@ function showSuccess(message) {
  */
 function hideSuccess() {
     elements.successMessage.style.display = 'none';
+}
+
+/**
+ * Show the catch-up banner with a message tailored to the user's state.
+ * @param {{daysBehind:number, estimatedCatchUpClaims:number, hasRecentActivity:boolean}} state
+ */
+function showCatchUpBanner(state) {
+    if (!elements.catchUpBanner || !elements.catchUpBody) return;
+
+    const claimsWord = state.estimatedCatchUpClaims === 1 ? 'transaction' : 'transactions';
+    const activityNote = state.hasRecentActivity
+        ? 'Your peer has been online recently, so once the window catches up you should see rewards.'
+        : '<strong>Your peer does not appear to have been online recently.</strong> '
+          + 'Catch-up transactions will advance your claim window but will not pay rewards '
+          + 'unless your node has been submitting online status. Ensure your node is running first.';
+
+    elements.catchUpBody.innerHTML =
+        `Your last-claimed timestamp is <strong>${Math.round(state.daysBehind)} days</strong> behind. `
+        + `Because each claim transaction can advance at most ~6 months, you need approximately `
+        + `<strong>${state.estimatedCatchUpClaims} ${claimsWord}</strong> to catch up. `
+        + `The first call(s) will pay <strong>0 tokens</strong> — they only advance your claim `
+        + `window through empty periods. Once the window reaches periods where your peer was online, `
+        + `subsequent claims pay rewards normally.<br><br>${activityNote}`;
+    elements.catchUpBanner.style.display = 'block';
+}
+
+/**
+ * Hide the catch-up banner.
+ */
+function hideCatchUpBanner() {
+    if (elements.catchUpBanner) {
+        elements.catchUpBanner.style.display = 'none';
+    }
 }
 
 /**
@@ -848,15 +897,110 @@ async function checkRewards() {
         elements.totalRewards.textContent = `${formatReward(totalRewards)} tokens`;
         elements.rewardsSection.style.display = 'block';
 
-        // Enable claim button if there are rewards
-        elements.claimRewards.disabled = totalRewards === 0n;
+        // Reset catch-up state on every check; only re-enable when probe confirms.
+        catchUpState = null;
+        hideCatchUpBanner();
+
+        // Catch-up probe: if rewards == 0 but the user's effective claim start
+        // is older than the contract's view window (MAX_VIEW_PERIODS_V2 *
+        // expectedPeriod), the rewards view returned 0 only because their
+        // online periods fall *outside* the visible window. The fix: surface
+        // this to the user so they can advance their `lastClaimed` via
+        // zero-reward "catch-up" claims (the contract's claim path handles
+        // empty-period advancement). Skipped on rewards-fetch error and when
+        // the monthly cap is the actual reason for zero rewards.
+        if (totalRewards === 0n && !rewardsError) {
+            try {
+                // NOTE: do not query SECONDS_PER_MONTH() — the ABI lists it but
+                // the deployed contract reverts on it. RewardEngine's
+                // `_getCurrentMonth()` is hardcoded to `block.timestamp / 30 days`,
+                // so we mirror that constant locally.
+                const SECONDS_PER_MONTH_LOCAL = 30n * 24n * 60n * 60n;
+
+                const [effectiveStartBN, expectedPeriodBN, maxViewPeriodsBN, maxMonthlyCap, latestBlock] =
+                    await Promise.all([
+                        rewardEngineContract.getEffectiveRewardStartTime(connectedAddress, peerIdBytes32, poolId),
+                        rewardEngineContract.expectedPeriod(),
+                        rewardEngineContract.MAX_VIEW_PERIODS_V2(),
+                        rewardEngineContract.MAX_MONTHLY_REWARD_PER_PEER(),
+                        provider.getBlock('latest')
+                    ]);
+
+                const now = BigInt(latestBlock.timestamp);
+                const effectiveStart = BigInt(effectiveStartBN);
+                const expectedPeriod = BigInt(expectedPeriodBN);
+                const maxViewPeriods = BigInt(maxViewPeriodsBN);
+                const windowSecs = maxViewPeriods * expectedPeriod;
+                const currentMonth = now / SECONDS_PER_MONTH_LOCAL;
+
+                // Cap check: if user already hit MAX_MONTHLY_REWARD_PER_PEER
+                // for this peer this month, rewards = 0 is from the cap, not
+                // staleness. The cap counter is mining-only and per-peer (see
+                // RewardEngine.monthlyRewardsClaimed comment); claims on a
+                // user's OTHER peers don't affect this entry. We don't bail on
+                // failure here — if the cap query fails for any reason, prefer
+                // showing catch-up over silently disabling the button.
+                let isCapped = false;
+                try {
+                    const claimedThisMonth = await rewardEngineContract.monthlyRewardsClaimed(
+                        peerIdBytes32, poolId, currentMonth
+                    );
+                    isCapped = BigInt(claimedThisMonth) >= BigInt(maxMonthlyCap);
+                } catch (capErr) {
+                    console.warn('Cap query failed (continuing without cap check):', capErr);
+                }
+
+                if (effectiveStart > 0n && now > effectiveStart && !isCapped) {
+                    const timeSinceStart = now - effectiveStart;
+                    if (timeSinceStart > windowSecs) {
+                        // Stale. Probe recent online activity (last ~30 days)
+                        // to distinguish "peer was offline, just came back"
+                        // from "peer never came online". getOnlineStatusSince
+                        // is capped at MAX_VIEW_PERIODS_V2 internally so a
+                        // 30-day window is always within bounds.
+                        const probeSince = now - BigInt(30 * 24 * 60 * 60);
+                        let hasRecentActivity = false;
+                        try {
+                            const r = await rewardEngineContract.getOnlineStatusSince(
+                                peerIdBytes32, poolId, probeSince
+                            );
+                            // r[0] = onlineCount over the window
+                            hasRecentActivity = Number(r[0] ?? r.onlineCount ?? 0n) > 0;
+                        } catch (probeErr) {
+                            console.warn('Recent activity probe failed (non-fatal):', probeErr);
+                        }
+
+                        // ceil((timeSinceStart / expectedPeriod) / maxViewPeriods)
+                        const periodsBehind = timeSinceStart / expectedPeriod;
+                        const estClaims = Number(
+                            (periodsBehind + maxViewPeriods - 1n) / maxViewPeriods
+                        );
+
+                        catchUpState = {
+                            daysBehind: Number(timeSinceStart) / 86400,
+                            estimatedCatchUpClaims: Math.max(1, estClaims),
+                            hasRecentActivity
+                        };
+                        showCatchUpBanner(catchUpState);
+                        console.log('⏳ Catch-up mode activated:', catchUpState);
+                    }
+                }
+            } catch (probeErr) {
+                console.warn('⚠️ Catch-up probe failed (non-fatal):', probeErr);
+            }
+        }
+
+        // Enable claim button if there are rewards OR catch-up is required.
+        // The pre-flight staticCall in claimRewards() will reject any call
+        // that would actually revert on-chain, so enabling here is safe.
+        elements.claimRewards.disabled = !(totalRewards > 0n || catchUpState);
 
         // Fetch and display claim status (periods info)
         try {
             console.log('📊 Fetching claim status (V2)...');
-            const [totalUnclaimedPeriods, defaultPeriodsPerClaim, maxPeriodsPerClaim, estimatedClaimsNeeded, hasMoreToClaim] = 
+            const [totalUnclaimedPeriods, defaultPeriodsPerClaim, maxPeriodsPerClaim, estimatedClaimsNeeded, hasMoreToClaim] =
                 await rewardEngineContract.getClaimStatusV2(connectedAddress, peerIdBytes32, poolId);
-            
+
             console.log('✅ Claim status:', {
                 totalUnclaimedPeriods: totalUnclaimedPeriods.toString(),
                 defaultPeriodsPerClaim: defaultPeriodsPerClaim.toString(),
@@ -873,17 +1017,31 @@ async function checkRewards() {
                     elements.periodsPerClaim.textContent = `${CLAIM_PERIODS_PER_TX} (~6 months)`;
                 }
                 if (elements.estimatedClaimsNeeded) {
-                    elements.estimatedClaimsNeeded.textContent = estimatedClaimsNeeded.toString();
+                    // Prefer the catch-up estimate when stale — getClaimStatusV2
+                    // returns 0 in that case because it only counts ONLINE
+                    // periods within the 540-period view window.
+                    const display = catchUpState
+                        ? `${catchUpState.estimatedCatchUpClaims} (catch-up)`
+                        : estimatedClaimsNeeded.toString();
+                    elements.estimatedClaimsNeeded.textContent = display;
                 }
                 if (elements.hasMoreToClaim) {
-                    elements.hasMoreToClaim.textContent = hasMoreToClaim ? 'Yes - Multiple claims needed' : 'No - Single claim sufficient';
-                    elements.hasMoreToClaim.style.color = hasMoreToClaim ? '#f39c12' : '#27ae60';
+                    if (catchUpState) {
+                        elements.hasMoreToClaim.textContent = 'Catch-up required';
+                        elements.hasMoreToClaim.style.color = '#b45309';
+                    } else {
+                        elements.hasMoreToClaim.textContent = hasMoreToClaim ? 'Yes - Multiple claims needed' : 'No - Single claim sufficient';
+                        elements.hasMoreToClaim.style.color = hasMoreToClaim ? '#f39c12' : '#27ae60';
+                    }
                 }
                 elements.claimStatusSection.style.display = 'block';
             }
 
-            // Update claim button text to indicate batched claiming
-            if (hasMoreToClaim && totalRewards > 0n) {
+            // Update claim button text. Catch-up takes priority over the
+            // "~6 months worth" label since the latter implies real rewards.
+            if (catchUpState) {
+                elements.claimRewards.textContent = 'Advance Claim Window';
+            } else if (hasMoreToClaim && totalRewards > 0n) {
                 elements.claimRewards.textContent = `Claim Rewards (~6 months worth)`;
             } else {
                 elements.claimRewards.textContent = 'Claim Rewards';
@@ -1068,23 +1226,75 @@ async function claimRewards() {
         });
 
         hideTransactionStatus();
-        
-        // Check if there are more periods to claim
+
+        // Detect actual paid amount from receipt logs. The contract emits
+        // MiningRewardsClaimed with amount=0 on catch-up calls (see
+        // RewardEngine._claimRewardsInternalV2), so the only reliable way to
+        // tell a real claim from an advance-only claim is to inspect events.
+        let paidAmount = 0n;
         try {
-            const [totalUnclaimedPeriods, , , , hasMoreToClaim] = 
-                await rewardEngineContract.getClaimStatusV2(connectedAddress, peerIdBytes32, poolId);
-            
-            if (hasMoreToClaim && totalUnclaimedPeriods > 0n) {
-                showSuccess(`Rewards claimed successfully! You have ${totalUnclaimedPeriods} more periods to claim. Click "Check Rewards" and claim again.`);
-            } else {
-                showSuccess(`Rewards claimed successfully! Transaction: ${receipt.hash}`);
+            const iface = rewardEngineContract.interface;
+            for (const log of (receipt.logs || [])) {
+                // Only attempt parsing for events from THIS contract — logs
+                // from token transfers (etc.) are in the same receipt and
+                // would throw if we tried to parse them against this ABI.
+                if (log.address && log.address.toLowerCase() !== rewardEngineContract.target.toLowerCase()) {
+                    continue;
+                }
+                try {
+                    const parsed = iface.parseLog({ topics: log.topics, data: log.data });
+                    if (parsed && (parsed.name === 'MiningRewardsClaimed' || parsed.name === 'StorageRewardsClaimed')) {
+                        const amt = parsed.args.amount ?? parsed.args[3] ?? 0n;
+                        paidAmount += BigInt(amt);
+                    }
+                } catch (_) { /* not one of our events */ }
             }
-        } catch (statusErr) {
-            // Fallback if status check fails
-            showSuccess(`Rewards claimed successfully! Transaction: ${receipt.hash}`);
+        } catch (e) {
+            console.warn('Receipt decoding failed (non-fatal):', e);
         }
 
-        // Refresh rewards display
+        // Message logic:
+        //  - paidAmount > 0  : real claim (normal success message; may still
+        //                      have more periods to fetch)
+        //  - paidAmount == 0 + catchUpState : advance-only catch-up (expected)
+        //  - paidAmount == 0 + !catchUpState : unusual (e.g. cap kicked in
+        //                      between check and submit) — say so honestly.
+        try {
+            const [totalUnclaimedPeriods, , , , hasMoreToClaim] =
+                await rewardEngineContract.getClaimStatusV2(connectedAddress, peerIdBytes32, poolId);
+
+            if (paidAmount > 0n) {
+                if (hasMoreToClaim && totalUnclaimedPeriods > 0n) {
+                    showSuccess(`Rewards claimed successfully! You have ${totalUnclaimedPeriods} more periods to claim. Click "Check Rewards" and claim again.`);
+                } else {
+                    showSuccess(`Rewards claimed successfully! Transaction: ${receipt.hash}`);
+                }
+            } else if (catchUpState) {
+                // Expected for catch-up txs: no rewards this call, window advanced.
+                showSuccess(
+                    `Claim window advanced (~6 months). No rewards were paid this transaction — ` +
+                    `this was a catch-up step. Click "Check Rewards" to see whether more catch-up ` +
+                    `is needed, or to claim accrued rewards. Tx: ${receipt.hash}`
+                );
+            } else {
+                // Zero paid and we weren't in catch-up. Could be a monthly-cap
+                // race or a same-period second click. Surface honestly.
+                showSuccess(
+                    `Transaction confirmed but no rewards were paid this call. ` +
+                    `This usually means the monthly cap was reached or the window was already ` +
+                    `up-to-date. Tx: ${receipt.hash}`
+                );
+            }
+        } catch (statusErr) {
+            // Fallback if status check fails — still surface the truth about paid amount.
+            if (paidAmount > 0n) {
+                showSuccess(`Rewards claimed successfully! Transaction: ${receipt.hash}`);
+            } else {
+                showSuccess(`Transaction confirmed. Tx: ${receipt.hash}`);
+            }
+        }
+
+        // Refresh rewards display (also re-evaluates catch-up state)
         setTimeout(() => {
             checkRewards();
         }, 2000);
@@ -1132,17 +1342,21 @@ function handleNetworkChange() {
     
     // Hide rewards section
     elements.rewardsSection.style.display = 'none';
-    
+
     // Hide monthly info
     if (elements.monthlyInfo) {
         elements.monthlyInfo.style.display = 'none';
     }
-    
+
     // Hide claim status section
     if (elements.claimStatusSection) {
         elements.claimStatusSection.style.display = 'none';
     }
-    
+
+    // Clear catch-up state on network change
+    catchUpState = null;
+    hideCatchUpBanner();
+
     // Disable claim button and reset text
     elements.claimRewards.disabled = true;
     elements.claimRewards.textContent = 'Claim Rewards';
@@ -1164,17 +1378,21 @@ function handleInputChange() {
         elements.rewardsSection.style.display = 'none';
         elements.claimRewards.disabled = true;
     }
-    
+
     // Hide monthly info when inputs change
     if (elements.monthlyInfo) {
         elements.monthlyInfo.style.display = 'none';
     }
-    
+
     // Hide claim status when inputs change
     if (elements.claimStatusSection) {
         elements.claimStatusSection.style.display = 'none';
     }
-    
+
+    // Clear catch-up state on input change
+    catchUpState = null;
+    hideCatchUpBanner();
+
     // Reset claim button text
     elements.claimRewards.textContent = 'Claim Rewards';
 }

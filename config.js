@@ -3,7 +3,7 @@
  * Update the contract addresses below with your deployed contract addresses
  */
 
-export const VERSION = '2.1.0';
+export const VERSION = '2.2.0';
 
 export const CONFIG = {
     // Contract addresses - UPDATED WITH ACTUAL DEPLOYED ADDRESSES
