@@ -1,5 +1,14 @@
 // Import ethers v6 from CDN
 import { ethers } from "https://cdnjs.cloudflare.com/ajax/libs/ethers/6.7.0/ethers.min.js";
+// Reown AppKit (formerly Web3Modal) — wallet connection layer.
+// Replaces direct window.ethereum / wallet_requestPermissions usage; supports
+// MetaMask + injected wallets on desktop AND any WalletConnect-compatible mobile
+// wallet via QR / deep-link, sidestepping the CAIP-25 endowment errors users hit
+// against newer MetaMask builds. Versions are pinned to avoid breakage from
+// silent CDN updates; appkit and appkit-adapter-ethers MUST be on matching majors.
+import { createAppKit } from "https://esm.sh/@reown/appkit@1.8.20";
+import { EthersAdapter } from "https://esm.sh/@reown/appkit-adapter-ethers@1.8.20";
+import { defineChain } from "https://esm.sh/@reown/appkit@1.8.20/networks";
 // Import configuration and ABI
 import { CONFIG, VERSION } from "./config.js";
 import { REWARD_ENGINE_ABI } from "./abi.js";
@@ -31,6 +40,20 @@ let rewardEngineContract = null;
 let currentNetwork = 'skale';
 let connectedAddress = null;
 let expectedWallet = null;
+
+// Reown AppKit instance + EIP-1193 provider supplied by whichever wallet the
+// user picked in the modal (MetaMask, Coinbase, mobile via WalletConnect, etc.).
+// `lastFinalizedAddress` tracks which address we've already wired up an ethers
+// signer + contract for, so the subscriber-driven connect flow is idempotent
+// even when subscribeAccount fires repeatedly with the same payload.
+let appKit = null;
+let eip1193Provider = null;
+let lastFinalizedAddress = null;
+
+// AppKit chain objects (one per supported network), built from CONFIG.NETWORKS
+// inside initializeAppKit(). Kept separate from the legacy NETWORKS map below
+// because AppKit expects a different shape (defineChain output).
+const APPKIT_CHAINS = { skale: null, base: null };
 
 // Catch-up state: populated by checkRewards() when getUnclaimedRewards
 // returns 0 BUT the user's effective claim start is older than the contract's
@@ -515,89 +538,267 @@ function validatePeerID(peerId) {
 }
 
 /**
- * Request MetaMask to show the account picker using wallet_requestPermissions.
- * Returns the selected accounts array.
+ * Build the AppKit chain object for one of our networks from CONFIG.NETWORKS.
+ * Kept here so CONFIG.NETWORKS remains the single source of truth.
  */
-async function requestAccountPicker() {
-    await window.ethereum.request({
-        method: 'wallet_requestPermissions',
-        params: [{ eth_accounts: {} }]
+function buildAppKitChain(key, explorerName) {
+    const n = CONFIG.NETWORKS[key];
+    return defineChain({
+        id: n.chainId,
+        caipNetworkId: `eip155:${n.chainId}`,
+        chainNamespace: 'eip155',
+        name: n.name,
+        nativeCurrency: n.nativeCurrency,
+        rpcUrls: { default: { http: [n.rpcUrl] } },
+        blockExplorers: { default: { name: explorerName, url: n.blockExplorer } },
     });
-    // After permissions are granted, fetch the now-selected accounts
-    return await window.ethereum.request({ method: 'eth_accounts' });
 }
 
 /**
- * Connect to MetaMask wallet
- * If an expectedWallet is set from URL params, it will automatically
- * prompt the account picker if the wrong account is initially connected.
+ * One-time AppKit initialization. Idempotent: safe to call multiple times,
+ * only the first call constructs the modal. Subscribers are wired here so they
+ * fire on the persisted-session auto-reconnect path (page reload after a prior
+ * connect) without any further user action.
+ */
+async function initializeAppKit() {
+    if (appKit) return;
+
+    APPKIT_CHAINS.skale = buildAppKitChain('skale', 'SKALE Explorer');
+    APPKIT_CHAINS.base = buildAppKitChain('base', 'Basescan');
+
+    appKit = createAppKit({
+        adapters: [new EthersAdapter()],
+        networks: [APPKIT_CHAINS.skale, APPKIT_CHAINS.base],
+        defaultNetwork: APPKIT_CHAINS[currentNetwork],
+        projectId: CONFIG.REOWN_PROJECT_ID,
+        metadata: CONFIG.APP_METADATA,
+        // Keep the modal focused on actual wallets — no email/social login,
+        // no telemetry pings to Reown's analytics endpoint.
+        features: { analytics: false, email: false, socials: false }
+    });
+
+    setupAppKitSubscribers();
+}
+
+/**
+ * Wire AppKit's reactive streams up to our connect/disconnect lifecycle.
+ *
+ * `subscribeProviders` and `subscribeAccount` fire independently and in
+ * undefined order — on auto-reconnect after page refresh, the account state
+ * can land before the EIP-1193 provider has been hydrated, or vice-versa.
+ * `maybeFinalizeConnect()` gates on BOTH signals being present before wiring
+ * up an ethers signer + contract, so the two orderings produce the same end
+ * state.
+ */
+function setupAppKitSubscribers() {
+    appKit.subscribeProviders((state) => {
+        eip1193Provider = state?.['eip155'] ?? null;
+        maybeFinalizeConnect();
+    });
+
+    appKit.subscribeAccount((state) => {
+        const wasConnected = !!lastFinalizedAddress;
+        const isConnectedNow = !!(state?.isConnected && state?.address);
+
+        if (isConnectedNow) {
+            maybeFinalizeConnect(state.address);
+        } else if (wasConnected) {
+            onWalletDisconnected();
+        }
+    });
+
+    appKit.subscribeNetwork((state) => {
+        const newChainId = state?.chainId ? Number(state.chainId) : null;
+        onNetworkChanged(newChainId);
+    });
+}
+
+/**
+ * Finalize the connect flow once we have BOTH an EIP-1193 provider AND a
+ * connected address. Idempotent: skips work if we've already finalized for
+ * this address. Called from both subscribeProviders and subscribeAccount.
+ */
+function maybeFinalizeConnect(addressFromAccountState) {
+    const address = addressFromAccountState ?? appKit?.getAddress();
+    if (!eip1193Provider || !address) return;
+    if (lastFinalizedAddress?.toLowerCase() === address.toLowerCase()) return;
+
+    lastFinalizedAddress = address;
+    onWalletConnected(address).catch((err) => {
+        console.error('Wallet finalize failed:', err);
+        showError(`Wallet connection failed: ${err.message}`);
+        updateConnectionStatus('Connection Failed', '🔴');
+    });
+}
+
+/**
+ * Build the ethers provider + signer from the AppKit-supplied EIP-1193
+ * provider and bring the rest of the UI in sync. Mirrors what the old
+ * connectWallet() did after eth_requestAccounts succeeded.
+ */
+async function onWalletConnected(address) {
+    showTransactionStatus('Finalizing wallet connection...', true);
+
+    // If this is an account-switch within an already-connected session (user
+    // changed accounts in their wallet UI), the old account's rewards / catch-up
+    // UI is now stale. Hide it before re-wiring; the user will need to click
+    // "Check Rewards" again for the new account.
+    const isAccountSwitch = connectedAddress && connectedAddress.toLowerCase() !== address.toLowerCase();
+    if (isAccountSwitch) {
+        elements.rewardsSection.style.display = 'none';
+        if (elements.claimStatusSection) elements.claimStatusSection.style.display = 'none';
+        if (elements.monthlyInfo) elements.monthlyInfo.style.display = 'none';
+        catchUpState = null;
+        hideCatchUpBanner();
+        elements.claimRewards.disabled = true;
+        elements.claimRewards.textContent = 'Claim Rewards';
+    }
+
+    provider = new ethers.BrowserProvider(eip1193Provider);
+    signer = await provider.getSigner();
+    connectedAddress = address;
+
+    // Sync the network dropdown to whatever chain the wallet actually landed on.
+    // If the wallet is on a chain we recognize, prefer that over the dropdown's
+    // prior value (wallet is the source of truth on connect).
+    const walletChainId = Number(appKit.getChainId() ?? 0);
+    const walletNetworkKey = Object.keys(NETWORKS).find(k => NETWORKS[k].chainId === walletChainId);
+    if (walletNetworkKey && walletNetworkKey !== currentNetwork) {
+        currentNetwork = walletNetworkKey;
+        elements.networkSelect.value = walletNetworkKey;
+        updateContractAddress();
+    }
+
+    const networkConfig = walletNetworkKey ? NETWORKS[walletNetworkKey] : null;
+    const networkName = networkConfig ? networkConfig.name : `Chain ID: ${walletChainId}`;
+
+    elements.connectedAddress.textContent = `${connectedAddress.slice(0, 6)}...${connectedAddress.slice(-4)}`;
+    elements.connectedNetwork.textContent = networkName;
+    elements.walletInfo.style.display = 'block';
+    elements.connectWallet.textContent = 'Connected';
+    elements.connectWallet.disabled = true;
+
+    elements.addFulaToken.disabled = false;
+    // Only enable check-rewards if the peer ID input is also valid.
+    elements.checkRewards.disabled = !validatePeerID(elements.peerIdInput.value.trim());
+
+    updateConnectionStatus('Wallet Connected', '🟢');
+
+    // initializeContract() handles switching the wallet's chain if the dropdown
+    // selection disagrees with the wallet's current chain.
+    await initializeContract();
+
+    // Expected-wallet (?wallet=) URL parameter check — preserved from old flow.
+    if (expectedWallet && connectedAddress.toLowerCase() !== expectedWallet.toLowerCase()) {
+        showWalletWarning(expectedWallet, connectedAddress);
+    } else {
+        hideWalletWarning();
+    }
+
+    hideTransactionStatus();
+    showSuccess('Wallet connected successfully!');
+    console.log('✅ Wallet connected successfully:', connectedAddress);
+}
+
+/**
+ * Clean up after a wallet disconnect (user clicks Disconnect inside the AppKit
+ * modal, or the wallet/session is torn down externally). Mirrors the inverse
+ * of onWalletConnected.
+ */
+function onWalletDisconnected() {
+    console.log('👛 Wallet disconnected');
+
+    provider = null;
+    signer = null;
+    rewardEngineContract = null;
+    connectedAddress = null;
+    lastFinalizedAddress = null;
+
+    elements.walletInfo.style.display = 'none';
+    elements.connectWallet.textContent = 'Connect Wallet';
+    elements.connectWallet.disabled = false;
+
+    elements.addFulaToken.disabled = true;
+    elements.checkRewards.disabled = true;
+    elements.claimRewards.disabled = true;
+    elements.claimRewards.textContent = 'Claim Rewards';
+
+    elements.rewardsSection.style.display = 'none';
+    if (elements.claimStatusSection) elements.claimStatusSection.style.display = 'none';
+    if (elements.monthlyInfo) elements.monthlyInfo.style.display = 'none';
+
+    catchUpState = null;
+    hideCatchUpBanner();
+    hideWalletWarning();
+
+    updateConnectionStatus('Not Connected', '⚪');
+}
+
+/**
+ * React to wallet-side network changes (user switches chain in their wallet
+ * UI, or AppKit completes a switchNetwork() request). We trust the wallet as
+ * the source of truth here: update the dropdown to match, hide stale rewards
+ * UI, and re-init the signer + contract against the new chain.
+ */
+async function onNetworkChanged(newChainId) {
+    if (!newChainId || !lastFinalizedAddress) return;
+
+    const networkKey = Object.keys(NETWORKS).find(k => NETWORKS[k].chainId === newChainId);
+    if (!networkKey) {
+        // Wallet is on an unsupported chain. Disable contract-dependent actions
+        // until the user switches back to SKALE or Base.
+        rewardEngineContract = null;
+        elements.checkRewards.disabled = true;
+        elements.claimRewards.disabled = true;
+        elements.connectedNetwork.textContent = `Chain ID: ${newChainId} (unsupported)`;
+        return;
+    }
+
+    if (networkKey !== currentNetwork) {
+        currentNetwork = networkKey;
+        elements.networkSelect.value = networkKey;
+        updateContractAddress();
+    }
+
+    // Stale rewards/claim UI — the user needs to re-check on the new chain.
+    elements.rewardsSection.style.display = 'none';
+    if (elements.claimStatusSection) elements.claimStatusSection.style.display = 'none';
+    if (elements.monthlyInfo) elements.monthlyInfo.style.display = 'none';
+    catchUpState = null;
+    hideCatchUpBanner();
+    elements.claimRewards.disabled = true;
+    elements.claimRewards.textContent = 'Claim Rewards';
+
+    // Re-grab provider/signer against the new chain and rebuild the contract.
+    if (eip1193Provider) {
+        try {
+            provider = new ethers.BrowserProvider(eip1193Provider);
+            signer = await provider.getSigner();
+            const network = NETWORKS[currentNetwork];
+            rewardEngineContract = new ethers.Contract(
+                network.rewardEngineAddress,
+                REWARD_ENGINE_ABI,
+                signer
+            );
+            elements.connectedNetwork.textContent = network.name;
+            elements.checkRewards.disabled = !validatePeerID(elements.peerIdInput.value.trim());
+            console.log('✅ Re-initialized contract after chain change:', network.name);
+        } catch (err) {
+            console.error('Re-init after chain change failed:', err);
+            showError(`Failed to switch contract to ${networkKey}: ${err.message}`);
+        }
+    }
+}
+
+/**
+ * Open the AppKit wallet picker. Actual session establishment happens
+ * asynchronously via the subscribers wired up in setupAppKitSubscribers().
  */
 async function connectWallet() {
     try {
-        console.log('🔗 Attempting to connect wallet...');
-
-        if (!window.ethereum) {
-            throw new Error('MetaMask not detected. Please install MetaMask browser extension.');
-        }
-
-        showTransactionStatus('Connecting to wallet...', true);
-
-        // If an expected wallet is specified, use wallet_requestPermissions
-        // to force the account picker so the user can choose the right one
-        let accounts;
-        if (expectedWallet) {
-            console.log(`🎯 Expected wallet: ${expectedWallet}, opening account picker...`);
-            showTransactionStatus('Please select the correct wallet in MetaMask...', true);
-            accounts = await requestAccountPicker();
-        } else {
-            accounts = await window.ethereum.request({
-                method: 'eth_requestAccounts'
-            });
-        }
-
-        if (accounts.length === 0) {
-            throw new Error('No accounts found. Please unlock your MetaMask wallet.');
-        }
-
-        // Create provider and signer
-        provider = new ethers.BrowserProvider(window.ethereum);
-        signer = await provider.getSigner();
-        connectedAddress = accounts[0];
-
-        // Get network info
-        const network = await provider.getNetwork();
-        console.log('🌐 Connected to network:', network);
-
-        // Get proper network name from our config
-        const networkConfig = Object.values(NETWORKS).find(n => Number(n.chainId) === Number(network.chainId));
-        const networkName = networkConfig ? networkConfig.name : `Chain ID: ${network.chainId}`;
-
-        // Update UI
-        elements.connectedAddress.textContent = `${connectedAddress.slice(0, 6)}...${connectedAddress.slice(-4)}`;
-        elements.connectedNetwork.textContent = networkName;
-        elements.walletInfo.style.display = 'block';
-        elements.connectWallet.textContent = 'Connected';
-        elements.connectWallet.disabled = true;
-
-        // Enable buttons
-        elements.addFulaToken.disabled = false;
-        elements.checkRewards.disabled = false;
-
-        updateConnectionStatus('Wallet Connected', '🟢');
-        hideTransactionStatus();
-        showSuccess('Wallet connected successfully!');
-
-        // Check if connected wallet matches the expected wallet from URL
-        if (expectedWallet && connectedAddress.toLowerCase() !== expectedWallet.toLowerCase()) {
-            showWalletWarning(expectedWallet, connectedAddress);
-        } else {
-            hideWalletWarning();
-        }
-
-        // Initialize contract
-        await initializeContract();
-
-        console.log('✅ Wallet connected successfully');
+        console.log('🔗 Opening wallet picker...');
+        if (!appKit) await initializeAppKit();
+        await appKit.open();
     } catch (error) {
         console.error('❌ Wallet connection failed:', error);
         hideTransactionStatus();
@@ -607,126 +808,81 @@ async function connectWallet() {
 }
 
 /**
- * Switch wallet by re-prompting the MetaMask account picker.
- * Called from the wallet mismatch warning banner.
+ * Switch wallet by disconnecting the current session and re-opening the
+ * picker. Used by the "Switch Wallet" button in the wallet-mismatch banner.
+ * Opening the Account view alone doesn't give a wallet picker — full
+ * disconnect + reconnect is the correct path.
  */
 async function switchWallet() {
     try {
-        if (!window.ethereum) {
-            throw new Error('MetaMask not detected.');
+        if (!appKit) {
+            showError('Wallet picker is not ready yet. Please reload the page.');
+            return;
         }
-
-        showTransactionStatus('Please select the correct wallet in MetaMask...', true);
-
-        const accounts = await requestAccountPicker();
-
-        if (accounts.length === 0) {
-            throw new Error('No accounts found.');
-        }
-
-        // Update provider, signer, and address
-        provider = new ethers.BrowserProvider(window.ethereum);
-        signer = await provider.getSigner();
-        connectedAddress = accounts[0];
-
-        // Update UI
-        const network = await provider.getNetwork();
-        const networkConfig = Object.values(NETWORKS).find(n => Number(n.chainId) === Number(network.chainId));
-        const networkName = networkConfig ? networkConfig.name : `Chain ID: ${network.chainId}`;
-
-        elements.connectedAddress.textContent = `${connectedAddress.slice(0, 6)}...${connectedAddress.slice(-4)}`;
-        elements.connectedNetwork.textContent = networkName;
-
+        showTransactionStatus('Disconnecting current wallet...', true);
+        await appKit.disconnect();
         hideTransactionStatus();
-
-        // Re-check wallet match
-        if (expectedWallet && connectedAddress.toLowerCase() !== expectedWallet.toLowerCase()) {
-            showWalletWarning(expectedWallet, connectedAddress);
-            showError('Still connected to the wrong wallet. Please try again.');
-        } else {
-            hideWalletWarning();
-            showSuccess('Switched to the correct wallet!');
-        }
-
-        // Re-initialize contract with new signer
-        await initializeContract();
-
+        await appKit.open();
     } catch (error) {
         console.error('❌ Wallet switch failed:', error);
         hideTransactionStatus();
-        if (error.code === 4001) {
-            showError('Wallet switch was cancelled.');
-        } else {
-            showError(`Failed to switch wallet: ${error.message}`);
-        }
+        showError(`Failed to switch wallet: ${error.message}`);
     }
 }
 
 /**
- * Initialize contract instance
+ * Poll the wallet's chain id until it matches `targetChainId` or the timeout
+ * elapses. Rebuilds `provider`/`signer` on every iteration so a successful
+ * return guarantees they're pointed at the new chain. Used after
+ * `appKit.switchNetwork()` instead of a fixed sleep because real wallets vary
+ * from <100ms (browser injected on a known chain) to many seconds (mobile WC
+ * sessions, or the chain-add prompt for SKALE on a wallet that doesn't have
+ * it yet).
+ */
+async function waitForChainId(targetChainId, timeoutMs = 8000) {
+    const start = Date.now();
+    while (Date.now() - start < timeoutMs) {
+        provider = new ethers.BrowserProvider(eip1193Provider);
+        const current = Number((await provider.getNetwork()).chainId);
+        if (current === targetChainId) {
+            signer = await provider.getSigner();
+            return true;
+        }
+        await new Promise(r => setTimeout(r, 250));
+    }
+    return false;
+}
+
+/**
+ * Initialize contract instance, switching the wallet's chain first if it
+ * disagrees with `currentNetwork`. Chain switching goes through AppKit, which
+ * internally handles both "switch to existing" and "add then switch" — the
+ * legacy wallet_switchEthereumChain/wallet_addEthereumChain dance is no
+ * longer needed at this layer.
  */
 async function initializeContract() {
     try {
         const network = NETWORKS[currentNetwork];
-        
-        if (!provider || !signer) {
+
+        if (!provider || !signer || !eip1193Provider || !appKit) {
             throw new Error('Wallet not connected');
         }
 
-        // Check if we're on the correct network
-        const currentChainId = (await provider.getNetwork()).chainId;
-        if (Number(currentChainId) !== network.chainId) {
+        const currentChainId = Number((await provider.getNetwork()).chainId);
+        if (currentChainId !== network.chainId) {
             console.log(`🔄 Switching from chain ${currentChainId} to ${network.chainId}`);
-            
-            // Try to switch network
-            try {
-                await window.ethereum.request({
-                    method: 'wallet_switchEthereumChain',
-                    params: [{ chainId: `0x${network.chainId.toString(16)}` }],
-                });
-                
-                // Wait a bit for the network switch to complete
-                await new Promise(resolve => setTimeout(resolve, 1000));
-                
-                // Recreate provider and signer after network switch
-                provider = new ethers.BrowserProvider(window.ethereum);
-                signer = await provider.getSigner();
-                
-            } catch (switchError) {
-                console.log('Switch error code:', switchError.code);
-                
-                // If network doesn't exist, add it
-                if (switchError.code === 4902) {
-                    await window.ethereum.request({
-                        method: 'wallet_addEthereumChain',
-                        params: [{
-                            chainId: `0x${network.chainId.toString(16)}`,
-                            chainName: network.name,
-                            rpcUrls: [network.rpcUrl],
-                            blockExplorerUrls: [network.blockExplorer],
-                            nativeCurrency: network.nativeCurrency
-                        }],
-                    });
-                    
-                    // Wait a bit for the network to be added and switched
-                    await new Promise(resolve => setTimeout(resolve, 2000));
-                    
-                    // Recreate provider and signer after network add
-                    provider = new ethers.BrowserProvider(window.ethereum);
-                    signer = await provider.getSigner();
-                } else {
-                    throw switchError;
-                }
+            await appKit.switchNetwork(APPKIT_CHAINS[currentNetwork]);
+
+            // Poll rather than sleep-and-hope. subscribeNetwork will also fire
+            // and rebuild via onNetworkChanged(), but the caller wants a usable
+            // contract on return so we re-grab the signer ourselves once the
+            // wallet confirms the switch.
+            const switched = await waitForChainId(network.chainId);
+            if (!switched) {
+                throw new Error(`Failed to switch to ${network.name}. Please manually switch networks in your wallet.`);
             }
         }
 
-        // Verify we're on the correct network now
-        const finalNetwork = await provider.getNetwork();
-        if (Number(finalNetwork.chainId) !== network.chainId) {
-            throw new Error(`Failed to switch to ${network.name}. Please manually switch networks in MetaMask.`);
-        }
-
-        // Create contract instance
         rewardEngineContract = new ethers.Contract(
             network.rewardEngineAddress,
             REWARD_ENGINE_ABI,
@@ -735,12 +891,7 @@ async function initializeContract() {
 
         console.log('✅ Contract initialized:', network.rewardEngineAddress);
         updateContractAddress();
-        
-        // Update connected network display
-        const networkConfig = Object.values(NETWORKS).find(n => Number(n.chainId) === Number(finalNetwork.chainId));
-        const networkName = networkConfig ? networkConfig.name : `Chain ID: ${finalNetwork.chainId}`;
-        elements.connectedNetwork.textContent = networkName;
-        
+        elements.connectedNetwork.textContent = network.name;
     } catch (error) {
         console.error('❌ Contract initialization failed:', error);
         showError(`Contract initialization failed: ${error.message}`);
@@ -748,24 +899,24 @@ async function initializeContract() {
 }
 
 /**
- * Add FULA token to the user's wallet using wallet_watchAsset
+ * Add FULA token to the user's wallet using wallet_watchAsset.
+ * Sent through the AppKit-provided EIP-1193 provider so this works for
+ * WalletConnect mobile wallets too, not just injected MetaMask. Note that
+ * wallet_watchAsset support varies by wallet — some mobile wallets silently
+ * return false; that path is handled below.
  */
 async function addFulaToken() {
     try {
-        if (!window.ethereum) {
-            throw new Error('No wallet detected. Please install MetaMask or another Web3 wallet.');
-        }
-
-        if (!connectedAddress) {
-            throw new Error('Please connect your wallet first');
+        if (!eip1193Provider || !connectedAddress) {
+            throw new Error('Please connect your wallet first.');
         }
 
         const tokenConfig = CONFIG.FULA_TOKEN;
-        
+
         console.log('🪙 Adding FULA token to wallet:', tokenConfig);
         showTransactionStatus('Adding FULA token to wallet...', false);
 
-        const wasAdded = await window.ethereum.request({
+        const wasAdded = await eip1193Provider.request({
             method: 'wallet_watchAsset',
             params: {
                 type: 'ERC20',
@@ -1323,43 +1474,47 @@ async function claimRewards() {
 }
 
 /**
- * Handle network selection change
+ * Handle network selection change from the dropdown. If a wallet is connected,
+ * ask AppKit to switch the wallet's chain to match; subscribeNetwork will then
+ * fire and onNetworkChanged() will rebuild the contract. If the user rejects
+ * the switch in their wallet, revert the dropdown so the UI stays consistent
+ * with the wallet's actual chain instead of stranding the dropdown ahead of
+ * reality.
  */
-function handleNetworkChange() {
-    currentNetwork = elements.networkSelect.value;
+async function handleNetworkChange() {
+    const previousNetwork = currentNetwork;
+    const newNetwork = elements.networkSelect.value;
+    if (previousNetwork === newNetwork) return;
+
+    currentNetwork = newNetwork;
     console.log('🌐 Network changed to:', currentNetwork);
-    
-    // Reset contract
+
     rewardEngineContract = null;
-    
-    // Update contract address display
     updateContractAddress();
-    
-    // Reinitialize contract if wallet is connected
-    if (provider && signer) {
-        initializeContract();
-    }
-    
-    // Hide rewards section
+
+    // Reset stale UI immediately so the user sees the network change reflect.
     elements.rewardsSection.style.display = 'none';
-
-    // Hide monthly info
-    if (elements.monthlyInfo) {
-        elements.monthlyInfo.style.display = 'none';
-    }
-
-    // Hide claim status section
-    if (elements.claimStatusSection) {
-        elements.claimStatusSection.style.display = 'none';
-    }
-
-    // Clear catch-up state on network change
+    if (elements.monthlyInfo) elements.monthlyInfo.style.display = 'none';
+    if (elements.claimStatusSection) elements.claimStatusSection.style.display = 'none';
     catchUpState = null;
     hideCatchUpBanner();
-
-    // Disable claim button and reset text
     elements.claimRewards.disabled = true;
     elements.claimRewards.textContent = 'Claim Rewards';
+
+    if (appKit && lastFinalizedAddress && APPKIT_CHAINS[currentNetwork]) {
+        try {
+            await appKit.switchNetwork(APPKIT_CHAINS[currentNetwork]);
+            // onNetworkChanged (via subscribeNetwork) rebuilds the contract.
+        } catch (err) {
+            console.error('Network switch failed:', err);
+            // Revert the dropdown to match the wallet's actual chain so the UI
+            // doesn't drift ahead of reality.
+            currentNetwork = previousNetwork;
+            elements.networkSelect.value = previousNetwork;
+            updateContractAddress();
+            showError(`Failed to switch network: ${err.message}`);
+        }
+    }
 }
 
 /**
@@ -1442,12 +1597,12 @@ function applyUrlParameters() {
 /**
  * Initialize the application
  */
-function initializeApp() {
+async function initializeApp() {
     console.log('🚀 Initializing Reward Engine Portal...');
-    
+
     // Apply URL parameters first (before event listeners to avoid triggering changes)
     applyUrlParameters();
-    
+
     // Set up event listeners
     elements.connectWallet.addEventListener('click', connectWallet);
     elements.addFulaToken.addEventListener('click', addFulaToken);
@@ -1456,22 +1611,24 @@ function initializeApp() {
     elements.networkSelect.addEventListener('change', handleNetworkChange);
     elements.peerIdInput.addEventListener('input', handleInputChange);
     elements.poolIdInput.addEventListener('input', handleInputChange);
-    
+
     // Initialize contract address display
     updateContractAddress();
-    
+
     // Display version
     const versionInfo = document.getElementById('versionInfo');
     if (versionInfo) {
         versionInfo.textContent = `v${VERSION}`;
     }
-    
-    // Check if wallet is already connected
-    if (window.ethereum && window.ethereum.selectedAddress) {
-        console.log('👛 Wallet already connected, attempting to reconnect...');
-        connectWallet();
-    }
-    
+
+    // Initialize AppKit AFTER DOM listeners and URL params are wired up.
+    // Subscribers fire immediately for any persisted session, so the UI must
+    // be fully in place before they run — otherwise onWalletConnected() would
+    // try to update DOM elements that haven't been bound yet (in practice
+    // they have, because `elements` is captured at module load, but explicit
+    // ordering avoids any latent surprise from this dependency).
+    await initializeAppKit();
+
     console.log('✅ Application initialized successfully');
 }
 

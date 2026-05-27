@@ -3,9 +3,23 @@
  * Update the contract addresses below with your deployed contract addresses
  */
 
-export const VERSION = '2.2.0';
+export const VERSION = '3.0.0';
 
 export const CONFIG = {
+    // Reown AppKit (formerly Web3Modal) — wallet connection.
+    // Replaces the legacy window.ethereum / wallet_requestPermissions flow.
+    // Project ID is public (safe to ship in client code); get one at cloud.reown.com.
+    REOWN_PROJECT_ID: "192a8f5e8d1742ea923be485e60f2612",
+
+    // Metadata shown to the user in their wallet during the WalletConnect handshake.
+    // `url` must match the page's actual origin in production or some wallets reject the session.
+    APP_METADATA: {
+        name: "Functionland Reward Engine",
+        description: "Claim mining and network rewards for your Fula peer",
+        url: "https://claim-web.fula.network",
+        icons: ["https://claim-web.fula.network/favicon.ico"]
+    },
+
     // Contract addresses - UPDATED WITH ACTUAL DEPLOYED ADDRESSES
     CONTRACTS: {
         skale: {
