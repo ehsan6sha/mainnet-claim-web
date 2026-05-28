@@ -150,6 +150,36 @@
                 </button>
             </div>
 
+            <!-- Manual-add fallback for FULA token. The auto-add path
+                 (wallet_watchAsset) is unreliable on mobile WalletConnect
+                 sessions — many mobile wallets either ignore the request or
+                 don't surface a prompt. This panel can be opened explicitly
+                 via the link, and is auto-opened when auto-add times out. -->
+            <div class="manual-add-row">
+                <a href="#" id="showManualAdd" class="manual-add-link">Auto-add not working? Add FULA manually</a>
+            </div>
+            <div id="manualAddPanel" class="manual-add-panel" style="display: none;">
+                <div class="manual-add-title">Add this token manually in your wallet</div>
+                <div class="manual-add-help">Open your wallet → Tokens → Import / Add custom token, then paste:</div>
+                <div class="manual-add-row">
+                    <span class="manual-add-label">Contract address</span>
+                    <span class="manual-add-value" id="manualAddAddress"></span>
+                    <button class="btn-copy" data-copy="manualAddAddress">Copy</button>
+                </div>
+                <div class="manual-add-row">
+                    <span class="manual-add-label">Symbol</span>
+                    <span class="manual-add-value" id="manualAddSymbol"></span>
+                </div>
+                <div class="manual-add-row">
+                    <span class="manual-add-label">Decimals</span>
+                    <span class="manual-add-value" id="manualAddDecimals"></span>
+                </div>
+                <div class="manual-add-row">
+                    <span class="manual-add-label">Network</span>
+                    <span class="manual-add-value" id="manualAddNetwork"></span>
+                </div>
+            </div>
+
             <!-- Transaction Status -->
             <div id="transactionStatus" class="transaction-status" style="display: none;">
                 <div class="status-content">

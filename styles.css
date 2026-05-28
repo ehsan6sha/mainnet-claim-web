@@ -240,6 +240,87 @@ main {
     min-width: 150px;
 }
 
+/* Manual-add fallback for the FULA token (shown when wallet_watchAsset is
+   not supported or times out — common on mobile WalletConnect sessions). */
+.manual-add-row {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    margin: 0.5rem 0;
+    flex-wrap: wrap;
+}
+
+.manual-add-link {
+    color: #4f46e5;
+    font-size: 0.85rem;
+    text-decoration: underline;
+    cursor: pointer;
+}
+
+.manual-add-link:hover {
+    color: #3730a3;
+}
+
+.manual-add-panel {
+    margin: 0.75rem 0 1.5rem;
+    padding: 1rem 1.25rem;
+    background: #f8fafc;
+    border: 1px solid #cbd5e1;
+    border-radius: 8px;
+    animation: slideIn 0.3s ease-out;
+}
+
+.manual-add-title {
+    font-weight: 700;
+    color: #1e293b;
+    margin-bottom: 0.25rem;
+}
+
+.manual-add-help {
+    font-size: 0.85rem;
+    color: #475569;
+    margin-bottom: 0.75rem;
+}
+
+.manual-add-label {
+    font-size: 0.8rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: #64748b;
+    min-width: 130px;
+}
+
+.manual-add-value {
+    font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+    font-size: 0.85rem;
+    color: #1e293b;
+    word-break: break-all;
+    flex: 1;
+}
+
+.btn-copy {
+    padding: 0.25rem 0.65rem;
+    border: 1px solid #cbd5e1;
+    background: white;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 0.8rem;
+    color: #475569;
+    transition: all 0.15s ease;
+}
+
+.btn-copy:hover {
+    background: #e2e8f0;
+    border-color: #94a3b8;
+}
+
+.btn-copy.copied {
+    background: #d1fae5;
+    border-color: #6ee7b7;
+    color: #047857;
+}
+
 /* Transaction status */
 .transaction-status {
     margin: 1.5rem 0;

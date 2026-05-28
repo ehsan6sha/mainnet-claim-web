@@ -112,7 +112,14 @@ let catchUpState = null;
         hasMoreToClaim: document.getElementById('hasMoreToClaim'),
         // Catch-up banner elements
         catchUpBanner: document.getElementById('catchUpBanner'),
-        catchUpBody: document.getElementById('catchUpBody')
+        catchUpBody: document.getElementById('catchUpBody'),
+        // Manual-add fallback for FULA token
+        showManualAdd: document.getElementById('showManualAdd'),
+        manualAddPanel: document.getElementById('manualAddPanel'),
+        manualAddAddress: document.getElementById('manualAddAddress'),
+        manualAddSymbol: document.getElementById('manualAddSymbol'),
+        manualAddDecimals: document.getElementById('manualAddDecimals'),
+        manualAddNetwork: document.getElementById('manualAddNetwork')
     };
 
 /**
@@ -899,54 +906,126 @@ async function initializeContract() {
 }
 
 /**
- * Add FULA token to the user's wallet using wallet_watchAsset.
- * Sent through the AppKit-provided EIP-1193 provider so this works for
- * WalletConnect mobile wallets too, not just injected MetaMask. Note that
- * wallet_watchAsset support varies by wallet — some mobile wallets silently
- * return false; that path is handled below.
+ * Populate the manual-add panel with the current network/token details and
+ * show it. Safe to call repeatedly. Used both when the user explicitly clicks
+ * the "Add FULA manually" link AND as the fallback when wallet_watchAsset
+ * fails or times out on the underlying wallet (extremely common on mobile
+ * WalletConnect sessions — many wallets either silently drop the method or
+ * never surface a prompt).
+ */
+function showManualAddPanel() {
+    const tokenConfig = CONFIG.FULA_TOKEN;
+    if (elements.manualAddAddress) elements.manualAddAddress.textContent = tokenConfig.address;
+    if (elements.manualAddSymbol) elements.manualAddSymbol.textContent = tokenConfig.symbol;
+    if (elements.manualAddDecimals) elements.manualAddDecimals.textContent = String(tokenConfig.decimals);
+    if (elements.manualAddNetwork) elements.manualAddNetwork.textContent = NETWORKS[currentNetwork]?.name ?? currentNetwork;
+    if (elements.manualAddPanel) elements.manualAddPanel.style.display = 'block';
+}
+
+/**
+ * Copy the text content of the element identified by `data-copy="<id>"` to
+ * the clipboard. Wired via event delegation in initializeApp so future copy
+ * buttons added to the manual-add panel don't need additional plumbing.
+ */
+async function handleCopyClick(event) {
+    const btn = event.target.closest('.btn-copy');
+    if (!btn) return;
+    const targetId = btn.getAttribute('data-copy');
+    if (!targetId) return;
+    const sourceEl = document.getElementById(targetId);
+    const text = sourceEl?.textContent?.trim();
+    if (!text) return;
+
+    try {
+        await navigator.clipboard.writeText(text);
+        const original = btn.textContent;
+        btn.textContent = 'Copied';
+        btn.classList.add('copied');
+        setTimeout(() => {
+            btn.textContent = original;
+            btn.classList.remove('copied');
+        }, 1500);
+    } catch (err) {
+        console.warn('Clipboard write failed:', err);
+        // Fallback: select the source text so the user can ⌘/Ctrl-C manually.
+        const range = document.createRange();
+        range.selectNodeContents(sourceEl);
+        const sel = window.getSelection();
+        sel.removeAllRanges();
+        sel.addRange(range);
+    }
+}
+
+/**
+ * Add FULA token to the user's wallet using wallet_watchAsset, with a
+ * timeout race so the UI doesn't hang forever when the wallet silently
+ * drops the request. On any failure path (timeout / false / error), we
+ * surface the manual-add panel so the user has a clear recovery option
+ * regardless of wallet support.
  */
 async function addFulaToken() {
-    try {
-        if (!eip1193Provider || !connectedAddress) {
-            throw new Error('Please connect your wallet first.');
-        }
+    if (!eip1193Provider || !connectedAddress) {
+        showError('Please connect your wallet first.');
+        return;
+    }
 
-        const tokenConfig = CONFIG.FULA_TOKEN;
+    const tokenConfig = CONFIG.FULA_TOKEN;
+    console.log('🪙 Attempting wallet_watchAsset for FULA:', tokenConfig);
+    showTransactionStatus('Sending request to your wallet — open your wallet app to approve...', true);
 
-        console.log('🪙 Adding FULA token to wallet:', tokenConfig);
-        showTransactionStatus('Adding FULA token to wallet...', false);
-
-        const wasAdded = await eip1193Provider.request({
-            method: 'wallet_watchAsset',
-            params: {
-                type: 'ERC20',
-                options: {
-                    address: tokenConfig.address,
-                    symbol: tokenConfig.symbol,
-                    decimals: tokenConfig.decimals,
-                    // image: '' // Optional: token logo URL
-                },
+    const request = eip1193Provider.request({
+        method: 'wallet_watchAsset',
+        params: {
+            type: 'ERC20',
+            options: {
+                address: tokenConfig.address,
+                symbol: tokenConfig.symbol,
+                decimals: tokenConfig.decimals,
             },
-        });
+        },
+    });
 
+    // 12s is long enough for a user to switch to their wallet app and tap
+    // approve, but short enough that the page doesn't feel broken when the
+    // wallet drops the request entirely (the common mobile-WC failure mode).
+    const TIMEOUT_MS = 12000;
+    const TIMEOUT = Symbol('timeout');
+    const timer = new Promise(resolve => setTimeout(() => resolve(TIMEOUT), TIMEOUT_MS));
+
+    try {
+        const result = await Promise.race([request, timer]);
         hideTransactionStatus();
 
-        if (wasAdded) {
+        if (result === TIMEOUT) {
+            console.log('⏳ wallet_watchAsset timed out — wallet likely does not support it over WalletConnect');
+            showManualAddPanel();
+            showError('Your wallet did not respond to the auto-add request (common on mobile WalletConnect). Use the details below to add FULA manually.');
+            return;
+        }
+
+        if (result === true) {
             showSuccess('FULA token added to your wallet successfully!');
             console.log('✅ FULA token added to wallet');
         } else {
-            showError('Token was not added. You may have cancelled the request.');
-            console.log('⚠️ User declined to add token');
+            // wallet returned false / null / undefined — usually means "cancelled"
+            // or "method not supported and silently rejected".
+            console.log('⚠️ wallet_watchAsset returned a falsy result:', result);
+            showManualAddPanel();
+            showError('Auto-add was cancelled or not supported by your wallet. Use the details below to add FULA manually.');
         }
     } catch (error) {
-        console.error('❌ Failed to add token:', error);
         hideTransactionStatus();
-        
+        console.error('❌ wallet_watchAsset threw:', error);
+
         if (error.code === 4001) {
-            showError('Request was rejected by user');
-        } else {
-            showError(`Failed to add token: ${error.message}`);
+            showError('Add-token request was rejected.');
+            return;
         }
+
+        // For any other error (method not in namespace, bridge error, etc.),
+        // fall back to manual add — same end-user experience as a timeout.
+        showManualAddPanel();
+        showError(`Auto-add failed (${error.message || 'unknown error'}). Use the details below to add FULA manually.`);
     }
 }
 
@@ -1611,6 +1690,21 @@ async function initializeApp() {
     elements.networkSelect.addEventListener('change', handleNetworkChange);
     elements.peerIdInput.addEventListener('input', handleInputChange);
     elements.poolIdInput.addEventListener('input', handleInputChange);
+
+    // Manual-add FULA fallback: link toggles the panel; copy buttons inside
+    // the panel are handled via delegated click so adding more rows later
+    // doesn't need additional wiring.
+    if (elements.showManualAdd) {
+        elements.showManualAdd.addEventListener('click', (e) => {
+            e.preventDefault();
+            const isHidden = !elements.manualAddPanel || elements.manualAddPanel.style.display === 'none';
+            if (isHidden) showManualAddPanel();
+            else if (elements.manualAddPanel) elements.manualAddPanel.style.display = 'none';
+        });
+    }
+    if (elements.manualAddPanel) {
+        elements.manualAddPanel.addEventListener('click', handleCopyClick);
+    }
 
     // Initialize contract address display
     updateContractAddress();
