@@ -1041,6 +1041,9 @@ async function addFulaToken() {
 // fula-chain contracts/core/FulaRefillTreasury.sol, addresses in config.js REFILL_TREASURY.
 // ---------------------------------------------------------------------------
 const fmtFula = (wei) => parseFloat(ethers.formatEther(wei)).toLocaleString('en-US', { maximumFractionDigits: 2 });
+// Treasury status reads go to the network's public RPC, not through the wallet relay
+// (eight sequential eth_calls over WalletConnect are slow and flaky on mobile).
+const readProvider = () => new ethers.JsonRpcProvider(NETWORKS[currentNetwork].rpcUrl);
 
 async function getStakingPool() {
     if (stakingPoolAddress[currentNetwork]) return stakingPoolAddress[currentNetwork];
@@ -1076,12 +1079,13 @@ async function renderRefillSection(needed) {
     const pool = await getStakingPool();
     if (!pool) { text.textContent = 'The reward pool holds less FULA than your claim. Could not read the pool address — please try again shortly.'; return; }
     try {
-        const treasury = new ethers.Contract(treasuryAddr, REFILL_TREASURY_ABI, provider);
+        const rp = readProvider();
+        const treasury = new ethers.Contract(treasuryAddr, REFILL_TREASURY_ABI, rp);
         const isPool = await treasury.isPool(pool);
         if (!isPool) { text.textContent = 'The reward pool holds less FULA than your claim. This pool is not registered with the refill treasury — please contact the Fula Governance Association.'; return; }
         const [poolId, paused, treasuryBalance, cooldown, tokenAddr] = await Promise.all([treasury.poolIdOf(pool), treasury.paused(), treasury.treasuryBalance(), treasury.cooldown(), treasury.token()]);
         const [p, preview] = await Promise.all([treasury.getPool(poolId), treasury.previewRefill(poolId)]);
-        const token = new ethers.Contract(tokenAddr, ERC20_BALANCE_ABI, provider);
+        const token = new ethers.Contract(tokenAddr, ERC20_BALANCE_ABI, rp);
         const balance = await token.balanceOf(pool);
         const now = Math.floor(Date.now() / 1000);
         const availableAt = Number(p.lastRefill) + Number(cooldown);
@@ -1106,13 +1110,22 @@ async function renderRefillSection(needed) {
                     const t = new ethers.Contract(treasuryAddr, REFILL_TREASURY_ABI, signer);
                     await t.refill.staticCall(poolId);          // pre-simulate: a doomed refill never reaches the wallet
                     btn.textContent = 'Confirm in wallet…';
-                    const tx = await t.refill(poolId, { gasLimit: currentNetwork === 'skale' ? 2000000 : 400000 });
+                    // The staticCall above proved the call succeeds; size the gas from a real estimate so a
+                    // too-small fixed limit cannot turn that into a paid out-of-gas. Fixed values only if
+                    // the estimate itself fails (RPC flakiness).
+                    let gasLimit;
+                    try { gasLimit = (await t.refill.estimateGas(poolId)) * 13n / 10n; }
+                    catch { gasLimit = currentNetwork === 'skale' ? 2000000n : 400000n; }
+                    const tx = await t.refill(poolId, { gasLimit });
                     result.textContent = 'Refill submitted: ' + tx.hash;
                     await tx.wait();
                     result.textContent = 'Refilled in tx ' + tx.hash + '. Re-checking your rewards…';
-                    showSuccess('Reward pool refilled. You can claim now.');
+                    const partial = needed && preview < needed;
+                    showSuccess(partial
+                        ? 'Reward pool refilled by ' + fmtFula(preview) + ' FULA, which covers only part of your claim. Re-checking…'
+                        : 'Reward pool refilled. You can claim now.');
                     hideRefillSection();
-                    await checkRewards();
+                    await checkRewards();   // re-probes the claim; re-shows this section if the pool is still short
                 } catch (e) {
                     const d = decodeContractError(e);
                     const m = { CooldownActive: 'This pool was refilled moments ago (24h cooldown). Try your claim again — it may already be covered.', NotBelowThreshold: 'The pool is already above its threshold — someone refilled it. Try your claim again.', TreasuryEmpty: 'The refill treasury is empty. It needs governance funding.', EnforcedPause: 'Refills are paused by the treasury guardian.' }[d.name];
