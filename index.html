@@ -137,6 +137,16 @@
                 </div>
             </div>
 
+            <!-- Refill Section (shown when the reward pool cannot pay the claim; anyone can top it up) -->
+            <div id="refillSection" class="claim-status-section" style="display: none;">
+                <h3>⛽ Reward pool needs a refill</h3>
+                <div id="refillText" class="claim-info-note"></div>
+                <div class="action-buttons" style="margin-top: 1rem;">
+                    <button id="refillBtn" class="btn btn-success" style="display: none;">Refill pool</button>
+                </div>
+                <div id="refillResult" style="margin-top: 0.5rem; font-size: 0.875rem; word-break: break-all;"></div>
+            </div>
+
             <!-- Action Buttons -->
             <div class="action-buttons">
                 <button id="addFulaToken" class="btn btn-primary" disabled>

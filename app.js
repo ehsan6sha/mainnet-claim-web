@@ -11,7 +11,7 @@ import { EthersAdapter } from "https://esm.sh/@reown/appkit-adapter-ethers@1.8.2
 import { defineChain } from "https://esm.sh/@reown/appkit@1.8.20/networks";
 // Import configuration and ABI
 import { CONFIG, VERSION } from "./config.js";
-import { REWARD_ENGINE_ABI } from "./abi.js";
+import { REWARD_ENGINE_ABI, REFILL_TREASURY_ABI, ERC20_BALANCE_ABI } from "./abi.js";
 
 // Network configurations from config
 const NETWORKS = {
@@ -40,6 +40,8 @@ let rewardEngineContract = null;
 let currentNetwork = 'skale';
 let connectedAddress = null;
 let expectedWallet = null;
+// RewardEngine pays claims from its staking pool contract; cached per network for the Refill control.
+const stakingPoolAddress = { skale: null, base: null };
 
 // Reown AppKit instance + EIP-1193 provider supplied by whichever wallet the
 // user picked in the modal (MetaMask, Coinbase, mobile via WalletConnect, etc.).
@@ -460,7 +462,7 @@ function getErrorMessage(errorName, errorArgs = []) {
         'InvalidPoolId': 'The Pool ID is invalid. Please use a valid pool ID.',
         'NotPoolMember': 'You are not a member of this pool.',
         'NoRewardsToClaim': 'No rewards are available to claim at this time.',
-        'InsufficientRewards': 'Insufficient rewards available.',
+        'InsufficientRewards': 'The reward pool holds less FULA than your claim, so it cannot be paid right now. Nothing was sent. Anyone can top the pool up from the refill treasury (see below).',
         'CircuitBreakerTripped': 'The contract is temporarily paused for security reasons.',
         'EnforcedPause': 'The contract is currently paused.',
         'InvalidAddress': 'Invalid wallet address.',
@@ -770,6 +772,7 @@ async function onNetworkChanged(newChainId) {
     // Stale rewards/claim UI — the user needs to re-check on the new chain.
     elements.rewardsSection.style.display = 'none';
     if (elements.claimStatusSection) elements.claimStatusSection.style.display = 'none';
+    hideRefillSection();
     if (elements.monthlyInfo) elements.monthlyInfo.style.display = 'none';
     catchUpState = null;
     hideCatchUpBanner();
@@ -1032,10 +1035,114 @@ async function addFulaToken() {
 /**
  * Check available rewards for the given peer ID
  */
+// ---------------------------------------------------------------------------
+// Refill control: when a claim would revert with InsufficientRewards (the RewardEngine's staking
+// pool holds less FULA than the claim), anyone can top the pool up from FulaRefillTreasury —
+// fula-chain contracts/core/FulaRefillTreasury.sol, addresses in config.js REFILL_TREASURY.
+// ---------------------------------------------------------------------------
+const fmtFula = (wei) => parseFloat(ethers.formatEther(wei)).toLocaleString('en-US', { maximumFractionDigits: 2 });
+
+async function getStakingPool() {
+    if (stakingPoolAddress[currentNetwork]) return stakingPoolAddress[currentNetwork];
+    try {
+        const a = await rewardEngineContract.stakingPool();
+        if (a && ethers.isAddress(a)) stakingPoolAddress[currentNetwork] = a;
+    } catch (e) { console.warn('stakingPool() unavailable:', e?.message); }
+    return stakingPoolAddress[currentNetwork];
+}
+
+function hideRefillSection() {
+    const s = document.getElementById('refillSection');
+    if (s) s.style.display = 'none';
+}
+
+/**
+ * Read why a refill is / is not possible right now and render the section.
+ * @param {bigint|null} needed - the amount the user is trying to claim (for the copy)
+ */
+async function renderRefillSection(needed) {
+    const section = document.getElementById('refillSection');
+    const text = document.getElementById('refillText');
+    const btn = document.getElementById('refillBtn');
+    const result = document.getElementById('refillResult');
+    if (!section || !text || !btn) return;
+    section.style.display = 'block';
+    btn.style.display = 'none';
+    result.textContent = '';
+    text.textContent = 'The reward pool holds less FULA than your claim, so the claim cannot be paid right now. Nothing was sent. Checking the refill treasury…';
+
+    const treasuryAddr = CONFIG.REFILL_TREASURY[currentNetwork];
+    if (!treasuryAddr) { text.textContent = 'The reward pool holds less FULA than your claim. No refill treasury on this network — please contact the Fula Governance Association.'; return; }
+    const pool = await getStakingPool();
+    if (!pool) { text.textContent = 'The reward pool holds less FULA than your claim. Could not read the pool address — please try again shortly.'; return; }
+    try {
+        const treasury = new ethers.Contract(treasuryAddr, REFILL_TREASURY_ABI, provider);
+        const isPool = await treasury.isPool(pool);
+        if (!isPool) { text.textContent = 'The reward pool holds less FULA than your claim. This pool is not registered with the refill treasury — please contact the Fula Governance Association.'; return; }
+        const [poolId, paused, treasuryBalance, cooldown, tokenAddr] = await Promise.all([treasury.poolIdOf(pool), treasury.paused(), treasury.treasuryBalance(), treasury.cooldown(), treasury.token()]);
+        const [p, preview] = await Promise.all([treasury.getPool(poolId), treasury.previewRefill(poolId)]);
+        const token = new ethers.Contract(tokenAddr, ERC20_BALANCE_ABI, provider);
+        const balance = await token.balanceOf(pool);
+        const now = Math.floor(Date.now() / 1000);
+        const availableAt = Number(p.lastRefill) + Number(cooldown);
+        const intro = 'The reward pool holds ' + fmtFula(balance) + ' FULA' + (needed ? ' but your claim is ' + fmtFula(needed) + ' FULA' : '') + '. Nothing was sent. ';
+        let reason;
+        if (paused) reason = 'Refills are paused by the treasury guardian.';
+        else if (!p.enabled) reason = 'This pool is disabled in the refill treasury.';
+        else if (balance >= p.threshold) reason = 'The pool is not below its refill threshold (' + fmtFula(p.threshold) + ' FULA), so a refill would do nothing right now.';
+        else if (availableAt > now) reason = 'This pool was refilled recently. Next refill available ' + new Date(availableAt * 1000).toLocaleString() + '.';
+        else if (treasuryBalance === 0n) reason = 'The refill treasury is empty — it needs governance funding before anyone can refill. Please contact the Fula Governance Association.';
+        else if (!(preview > 0n)) reason = 'A refill would send nothing right now.';
+        else {
+            reason = 'Anyone can top it up from the refill treasury: a refill sends +' + fmtFula(preview) + ' FULA now' +
+                (needed && preview < needed ? ' (covers ' + fmtFula(preview) + ' of the ' + fmtFula(needed) + ' FULA needed)' : '') +
+                '. You pay only the gas; the FULA comes from the treasury.';
+            btn.style.display = 'inline-flex';
+            btn.disabled = false;
+            btn.textContent = 'Refill pool (+' + fmtFula(preview) + ' FULA)';
+            btn.onclick = async () => {
+                btn.disabled = true; btn.textContent = 'Checking…';
+                try {
+                    const t = new ethers.Contract(treasuryAddr, REFILL_TREASURY_ABI, signer);
+                    await t.refill.staticCall(poolId);          // pre-simulate: a doomed refill never reaches the wallet
+                    btn.textContent = 'Confirm in wallet…';
+                    const tx = await t.refill(poolId, { gasLimit: currentNetwork === 'skale' ? 2000000 : 400000 });
+                    result.textContent = 'Refill submitted: ' + tx.hash;
+                    await tx.wait();
+                    result.textContent = 'Refilled in tx ' + tx.hash + '. Re-checking your rewards…';
+                    showSuccess('Reward pool refilled. You can claim now.');
+                    hideRefillSection();
+                    await checkRewards();
+                } catch (e) {
+                    const d = decodeContractError(e);
+                    const m = { CooldownActive: 'This pool was refilled moments ago (24h cooldown). Try your claim again — it may already be covered.', NotBelowThreshold: 'The pool is already above its threshold — someone refilled it. Try your claim again.', TreasuryEmpty: 'The refill treasury is empty. It needs governance funding.', EnforcedPause: 'Refills are paused by the treasury guardian.' }[d.name];
+                    result.textContent = m || (/reject|denied/i.test(String(e?.message)) ? 'Refill cancelled.' : 'Refill failed: ' + (d.name !== 'Unknown' ? d.name : String(e?.shortMessage || e?.message || e).slice(0, 160)));
+                    btn.disabled = false; btn.textContent = 'Refill pool (+' + fmtFula(preview) + ' FULA)';
+                }
+            };
+        }
+        text.textContent = intro + reason;
+    } catch (e) {
+        console.warn('refill status read failed:', e);
+        text.textContent = 'The reward pool holds less FULA than your claim. Could not read the refill treasury right now — please try again shortly.';
+    }
+}
+
+/** Pre-flight the claim on the node; returns the decoded error name (or null when it would succeed). */
+async function probeClaim(peerIdBytes32, poolId) {
+    try {
+        await rewardEngineContract.claimRewardsWithLimitV2.staticCall(peerIdBytes32, poolId, CLAIM_PERIODS_PER_TX);
+        return null;
+    } catch (e) {
+        return decodeContractError(e).name || 'Unknown';
+    }
+}
+
 async function checkRewards() {
     try {
         const peerId = elements.peerIdInput.value.trim();
         const poolId = parseInt(elements.poolIdInput.value) || 1;
+        hideRefillSection();
 
         if (!validatePeerID(peerId)) {
             throw new Error('Please enter a valid Peer ID');
@@ -1224,6 +1331,18 @@ async function checkRewards() {
         // The pre-flight staticCall in claimRewards() will reject any call
         // that would actually revert on-chain, so enabling here is safe.
         elements.claimRewards.disabled = !(totalRewards > 0n || catchUpState);
+
+        // Pre-flight NOW, not only on click: if the staking pool cannot pay this claim
+        // (InsufficientRewards), block the button and show the Refill control instead.
+        if (totalRewards > 0n) {
+            const probe = await probeClaim(peerIdBytes32, poolId);
+            if (probe === 'InsufficientRewards') {
+                elements.claimRewards.disabled = true;
+                await renderRefillSection(totalRewards);
+            } else if (probe) {
+                console.log('claim pre-flight would revert:', probe);
+            }
+        }
 
         // Fetch and display claim status (periods info)
         try {
@@ -1418,6 +1537,11 @@ async function claimRewards() {
         } catch (simulationError) {
             console.error('❌ Pre-flight simulation failed:', simulationError);
             const decodedError = decodeContractError(simulationError);
+            if (decodedError.name === 'InsufficientRewards') {
+                // The staking pool is short, not the user: offer the permissionless refill.
+                elements.claimRewards.disabled = true;
+                renderRefillSection(null);
+            }
             if (decodedError.name && decodedError.name !== 'Unknown') {
                 throw new Error(getErrorMessage(decodedError.name, decodedError.args));
             }

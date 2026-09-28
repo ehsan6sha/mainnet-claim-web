@@ -30,6 +30,14 @@ export const CONFIG = {
         }
     },
     
+    // FulaRefillTreasury (fula-chain contracts/core/FulaRefillTreasury.sol): anyone can call
+    // refill(poolId) to top the RewardEngine staking pool back up when it is short. Used by the
+    // "Refill" control shown when a claim would revert with InsufficientRewards.
+    REFILL_TREASURY: {
+        skale: "0xb821C2023cf7DB5a9D7CF3703aEaCB1395F800Af",
+        base: "0x78B54b8F2A6DbeC2A7Cf252DEc5C56E51D2A43E8"
+    },
+
     // FULA Token address (same on both networks)
     FULA_TOKEN: {
         address: "0x9e12735d77c72c5C3670636D428f2F3815d8A4cB",

@@ -3252,3 +3252,25 @@ export const REWARD_ENGINE_ABI = [
       "type": "function"
     }
   ];
+
+// FulaRefillTreasury — the subset the Refill control uses (human-readable ABI, ethers v6).
+export const REFILL_TREASURY_ABI = [
+  "function refill(uint256 poolId) returns (uint256 amount)",
+  "function previewRefill(uint256 poolId) view returns (uint256)",
+  "function isPool(address account) view returns (bool)",
+  "function poolIdOf(address account) view returns (uint256)",
+  "function getPool(uint256 poolId) view returns ((address account, uint64 lastRefill, bool enabled, uint256 threshold, uint256 maxThreshold))",
+  "function paused() view returns (bool)",
+  "function treasuryBalance() view returns (uint256)",
+  "function cooldown() view returns (uint64)",
+  "function token() view returns (address)",
+  "error UnknownPool(uint256 poolId)",
+  "error PoolDisabled(uint256 poolId)",
+  "error NotBelowThreshold(uint256 poolId, uint256 balance, uint256 threshold)",
+  "error CooldownActive(uint256 poolId, uint256 availableAt)",
+  "error TreasuryEmpty()",
+  "error EnforcedPause()",
+  "event Refilled(uint256 indexed poolId, address indexed account, address indexed caller, uint256 amount, uint256 poolBalanceBefore, bool truncated)"
+];
+
+export const ERC20_BALANCE_ABI = ["function balanceOf(address account) view returns (uint256)"];
